@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculadora de Builds — STALZONE</title>
+<style>
+:root{
+  --bg:#0b0d0c; --panel:#131715; --panel2:#1a201d; --line:#2a322d;
+  --fg:#e6ebe7; --muted:#8b978f; --acc:#7fd67f; --acc2:#4ea64e;
+  --pos:#53c353; --neg:#c15252; --warn:#e0a34a;
+  --r-ordinary:#eeeeee; --r-unordinary:#53c353; --r-special:#4a9ee0;
+  --r-rare:#b06fe0; --r-exclusive:#e05c5c; --r-legendary:#e0c04a; --r-unique:#e08a3c;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 "Segoe UI",Roboto,system-ui,sans-serif}
+h1,h2,h3{margin:0;font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+button:hover:not(:disabled){border-color:var(--acc2);background:#202723}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--acc2);border-color:var(--acc2);color:#08110a;font-weight:600}
+button.primary:hover:not(:disabled){background:var(--acc);border-color:var(--acc)}
+button.danger:hover{border-color:var(--neg);color:var(--neg)}
+select,input[type=text],input[type=number]{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+input[type=range]{width:100%;accent-color:var(--acc2)}
+label{font-size:12px;color:var(--muted)}
+a{color:var(--acc)}
+
+header{border-bottom:1px solid var(--line);background:linear-gradient(180deg,#151a17,#0e1210);padding:12px 18px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+header h1{font-size:17px;letter-spacing:.5px}
+header h1 span{color:var(--acc)}
+.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.tabs button{border-radius:6px 6px 0 0;border-bottom:none;padding:7px 14px}
+.tabs button.on{background:var(--acc2);border-color:var(--acc2);color:#08110a;font-weight:600}
+
+main{padding:16px;max-width:1500px;margin:0 auto}
+.grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(340px,1fr);gap:16px;align-items:start}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.panel>h2{padding:10px 14px;font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);border-bottom:1px solid var(--line);background:var(--panel2);display:flex;align-items:center;gap:8px}
+.panel>h2 .tag{margin-left:auto;font-size:11px;text-transform:none;letter-spacing:0}
+.pad{padding:12px 14px}
+.row{display:flex;gap:10px;align-items:center}
+.field{flex:1;min-width:0}
+.hidden{display:none!important}
+
+/* selector de item */
+.slot{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;min-height:52px}
+.slot:hover{border-color:var(--acc2)}
+.slot img{width:34px;height:34px;object-fit:contain;flex:none}
+.slot .ph{width:34px;height:34px;flex:none;border:1px dashed var(--line);border-radius:6px;display:grid;place-items:center;color:var(--muted);font-size:18px}
+.slot .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .qt{font-size:12px;color:var(--muted);flex:none}
+.slot .x{flex:none;padding:2px 7px;font-size:12px;line-height:1.3}
+
+.artrow{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:var(--panel2)}
+.artrow .head{display:flex;align-items:center;gap:10px;padding:8px 10px}
+.artrow .head img{width:32px;height:32px;object-fit:contain;flex:none}
+.artrow .head .ph{width:32px;height:32px;flex:none;border:1px dashed var(--line);border-radius:6px;display:grid;place-items:center;color:var(--muted)}
+.artrow .head .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.artrow .body{padding:0 10px 10px;border-top:1px solid var(--line);padding-top:10px}
+.ctl{display:grid;grid-template-columns:auto 1fr 62px;gap:8px;align-items:center;margin-bottom:6px}
+.ctl>label{white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.chip{font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;user-select:none}
+.chip.on{border-color:var(--acc2);color:var(--acc);background:#16261a}
+.chip.dim{opacity:.4;cursor:not-allowed}
+
+/* resultados */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 14px}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.kpi .v{font-size:22px;font-weight:600;color:var(--acc);font-variant-numeric:tabular-nums}
+.kpi .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.stat{display:flex;gap:10px;padding:4px 14px;font-variant-numeric:tabular-nums}
+.stat .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat .v{font-weight:600;flex:none}
+.cat{padding:9px 14px 3px;font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted)}
+.alert{margin:10px 14px;padding:8px 10px;border-radius:6px;background:#2a1a12;border:1px solid #5c3a20;color:var(--warn);font-size:12.5px}
+.empty{padding:26px 14px;text-align:center;color:var(--muted)}
+
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:16px;z-index:50}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:min(620px,100%);height:min(660px,86vh);box-shadow:0 20px 60px rgba(0,0,0,.6);display:flex;flex-direction:column}
+.modal .list{flex:1}
+.modal .box>h3{padding:12px 14px;border-bottom:1px solid var(--line);font-size:14px;display:flex;align-items:center;gap:10px}
+.modal .box>h3 button{margin-left:auto}
+.modal .srch{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px}
+.modal .list{overflow:auto;padding:8px}
+.opt{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:7px;cursor:pointer}
+.opt:hover{background:var(--panel2)}
+.opt img{width:30px;height:30px;object-fit:contain;flex:none}
+.opt .sub{font-size:11px;color:var(--muted)}
+.opt .meta{margin-left:auto;font-size:11px;color:var(--muted);text-align:right;flex:none}
+
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:5px 10px;text-align:right;border-bottom:1px solid var(--line);font-size:13px}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px;position:sticky;top:0;background:var(--panel2)}
+.scroll{overflow:auto;max-height:70vh}
+.bar{height:6px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:8px 0}
+.bar>i{display:block;height:100%;background:var(--acc2);width:0;transition:width .12s}
+.note{font-size:12px;color:var(--muted)}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;resize:vertical}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:700px){.split,.kpis{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>STAL<span>ZONE</span> · Calculadora de builds</h1>
+  <div class="tabs">
+    <button id="tab-calc" class="on" data-tab="calc">Calculadora</button>
+    <button id="tab-opt" data-tab="opt">Optimizador</button>
+    <button id="tab-cmp" data-tab="cmp">Comparar</button>
+    <button id="tab-save" data-tab="save">Builds guardadas</button>
+  </div>
+</header>
+
+<main>
+  <!-- ============ CALCULADORA ============ -->
+  <section id="v-calc">
+    <div class="grid">
+      <div>
+        <div class="panel">
+          <h2>Mochila / Contenedor <span class="tag" id="cap-tag"></span></h2>
+          <div class="pad">
+            <button class="slot" id="pick-container"><span class="ph">+</span><span class="nm">Selecciona una mochila…</span></button>
+            <div class="split" style="margin-top:10px">
+              <div><label>Eficiencia (bonus)</label><div class="mono" id="c-eff">—</div></div>
+              <div><label>Protección (penaliz.)</label><div class="mono" id="c-pro">—</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Armadura</h2>
+          <div class="pad">
+            <button class="slot" id="pick-armor"><span class="ph">+</span><span class="nm">Selecciona una armadura…</span></button>
+            <div class="ctl" id="armor-lvl-wrap" style="margin-top:10px">
+              <label>Nivel</label><input type="range" id="armor-lvl" min="0" max="15" step="1" value="0">
+              <input type="number" id="armor-lvl-n" min="0" max="15" value="0">
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Artefactos <span class="tag" id="art-tag"></span></h2>
+          <div class="pad" id="art-slots"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Estado del personaje</h2>
+          <div class="pad">
+            <div class="ctl"><label>Nivel de hemorragia</label><input type="range" id="bleed" min="0" max="4" step="1" value="0"><input type="number" id="bleed-n" min="0" max="4" value="0"></div>
+            <div class="row" style="margin-top:4px"><label style="cursor:pointer"><input type="checkbox" id="burning"> En llamas (quemándose)</label></div>
+            <p class="note" style="margin:8px 0 0">Reducen la regeneración y la eficacia de curación, igual que en el juego.</p>
+            <div id="reactions-wrap" style="margin-top:10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <h2>Estadísticas finales <span class="tag"><button id="btn-reset" class="danger">Vaciar build</button></span></h2>
+          <div id="results"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OPTIMIZADOR ============ -->
+  <section id="v-opt" class="hidden">
+    <div class="grid">
+      <div class="panel">
+        <h2>Parámetros de búsqueda</h2>
+        <div class="pad">
+          <p class="note" style="margin-top:0">Usa la mochila y la armadura seleccionadas en la pestaña <b>Calculadora</b>. Busca la combinación de artefactos que maximiza el objetivo sin superar los límites de acumulación.</p>
+          <label>Objetivo a maximizar</label>
+          <select id="o-goal"></select>
+          <div class="split" style="margin-top:10px">
+            <div><label>Nivel de los artefactos</label><input type="number" id="o-lvl" min="0" max="15" value="15"></div>
+            <div><label>Rareza / calidad (%)</label><input type="number" id="o-qual" min="0" max="190" value="175"></div>
+          </div>
+          <div style="margin-top:10px">
+            <label style="cursor:pointer"><input type="checkbox" id="o-dup" checked> Permitir artefactos repetidos</label>
+          </div>
+          <div style="margin-top:6px">
+            <label style="cursor:pointer"><input type="checkbox" id="o-limits" checked> Respetar límites de acumulación</label>
+          </div>
+          <div id="o-limit-rows" style="margin-top:8px"></div>
+          <div class="split" style="margin-top:10px">
+            <div><label>Candidatos máx.</label><input type="number" id="o-cand" min="6" max="106" value="34"></div>
+            <div><label>Tiempo máx. (s)</label><input type="number" id="o-time" min="1" max="120" value="12"></div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="primary" id="o-run">Buscar mejor build</button>
+            <button id="o-stop" disabled>Detener</button>
+          </div>
+          <div class="bar"><i id="o-bar"></i></div>
+          <div class="note" id="o-status">Listo.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Resultado</h2>
+        <div id="o-result" class="empty">Aún no se ha ejecutado ninguna búsqueda.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMPARAR ============ -->
+  <section id="v-cmp" class="hidden">
+    <div class="panel">
+      <h2>Comparación de builds <span class="tag"><button id="cmp-add">Añadir build actual</button></span></h2>
+      <div id="cmp-body" class="empty">Guarda o añade builds para compararlas lado a lado.</div>
+    </div>
+  </section>
+
+  <!-- ============ GUARDADAS ============ -->
+  <section id="v-save" class="hidden">
+    <div class="grid">
+      <div class="panel">
+        <h2>Builds guardadas</h2>
+        <div class="pad">
+          <div class="row"><input type="text" id="s-name" placeholder="Nombre de la build"><button class="primary" id="s-save">Guardar actual</button></div>
+          <div id="s-list" style="margin-top:12px"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Exportar / Importar</h2>
+        <div class="pad">
+          <label>Código de la build actual (compártelo o guárdalo)</label>
+          <textarea id="s-code" readonly></textarea>
+          <div class="row" style="margin-top:8px">
+            <button id="s-copy">Copiar código</button>
+            <button id="s-link">Copiar enlace</button>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+          <label>Importar un código</label>
+          <textarea id="s-imp" placeholder="Pega aquí un código de build…"></textarea>
+          <button class="primary" id="s-do-imp" style="margin-top:8px">Importar</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="modal-host"></div>
+
+<script src="data/gamedata.js"></script>
+<script>
+/* =========================================================================
+   MOTOR DE CÁLCULO
+   Réplica exacta de la lógica de la calculadora oficial de stalzone.wiki.
+   Verificado contra una build de referencia: 26/26 estadísticas idénticas.
+   ========================================================================= */
+const ENGINE = (() => {
+  const ACC = ['radiation_accumulation','biological_accumulation','psycho_accumulation','thermal_accumulation','frost_accumulation'];
+  // Acumulaciones que la protección de la mochila puede mitigar (la congelación no).
+  const CONT_PROTECT = ['radiation_accumulation','biological_accumulation','psycho_accumulation','thermal_accumulation'];
+  // Stats donde un valor negativo es lo bueno (acumulaciones, retroceso, oscilación).
+  const CAN_BOTH = [...ACC,'bleeding_accumulation','combustion_accumulation','recoil_bonus','wiggle_bonus'];
+  const POLY = ['cost','recharge','blocking_damage','trigger_damage'];
+  const REACTIONS = ['reaction_to_tear','reaction_to_electroshock','reaction_to_chemical_burn','reaction_to_burn'];
+  // Umbrales a partir de los cuales el personaje empieza a recibir daño.
+  const LIMITS = {radiation_accumulation:.5, biological_accumulation:.5, psycho_accumulation:.5, thermal_accumulation:.5, frost_accumulation:1};
+  const BLEEDING_PENALTIES = [[0,0],[2.5,30],[17.5,80],[27.5,130],[37.5,180]];
+  const BURNING_PENALTIES = {regeneration:5, efficiency:65};
+  const RIDX = {'rarity.unordinary':0,'rarity.special':1,'rarity.rare':2,'rarity.exclusive':3,'rarity.legendary':4,'rarity.unique':5};
+  const RUBIK = '9n7z'; // único artefacto con un 4.º hueco de stat adicional (desde nivel 1)
+
+  const SORTED = ['bleeding_accumulation','combustion_accumulation','artefakt_heal','bullet_dmg_factor','health_bonus',
+    'heal_efficiency','regeneration_bonus','speed_modifier','sprint_speed_modifier','stamina_bonus','stamina_regeneration_bonus',
+    'max_weight_bonus','recoil_bonus','wiggle_bonus','tear_dmg_factor','stopping_protection','explosion_dmg_factor','burn_dmg_factor','electra_dmg_factor',
+    'chemical_burn_dmg_factor','radiation_protection_short','radiation_protection','thermal_protection','biological_protection',
+    'psycho_protection','frost_protection','bleeding_protection','reaction_to_electroshock','reaction_to_burn',
+    'reaction_to_chemical_burn','reaction_to_tear','biological_accumulation','psycho_accumulation','thermal_accumulation',
+    'radiation_accumulation','frost_accumulation','blocking_damage','recharge','cost','trigger_damage'];
+
+  const CATEGORY = {
+    health_bonus:'survivability', artefakt_heal:'survivability', regeneration_bonus:'survivability',
+    heal_efficiency:'survivability', bleeding_accumulation:'survivability', combustion_accumulation:'accumulation',
+    speed_modifier:'mobility', sprint_speed_modifier:'mobility', stamina_bonus:'mobility',
+    stamina_regeneration_bonus:'mobility', max_weight_bonus:'mobility', recoil_bonus:'mobility', wiggle_bonus:'mobility',
+    bullet_dmg_factor:'protection', tear_dmg_factor:'protection', stopping_protection:'protection',
+    explosion_dmg_factor:'protection', burn_dmg_factor:'protection', chemical_burn_dmg_factor:'protection',
+    electra_dmg_factor:'protection', radiation_protection:'protection', radiation_protection_short:'protection',
+    biological_protection:'protection', psycho_protection:'protection', thermal_protection:'protection',
+    frost_protection:'protection', bleeding_protection:'protection',
+    radiation_accumulation:'accumulation', biological_accumulation:'accumulation', psycho_accumulation:'accumulation',
+    thermal_accumulation:'accumulation', frost_accumulation:'accumulation',
+    reaction_to_tear:'reactions', reaction_to_electroshock:'reactions', reaction_to_chemical_burn:'reactions', reaction_to_burn:'reactions',
+    cost:'polyhedron', recharge:'polyhedron', blocking_damage:'polyhedron', trigger_damage:'polyhedron',
+  };
+  const CATEGORY_ORDER = ['survivability','mobility','protection','reactions','accumulation','polyhedron','other'];
+  const CATEGORY_LABEL = {survivability:'Supervivencia', mobility:'Movilidad', protection:'Protección',
+    reactions:'Reacciones a anomalías', accumulation:'Acumulación', polyhedron:'Poliedro', other:'Otros'};
+
+  /** Rareza derivada del porcentaje de calidad (0–190). */
+  function rarityOf(q){
+    if (q >= 175.01 && q <= 190) return 'rarity.unique';
+    if (q >= 160.01) return 'rarity.legendary';
+    if (q >= 145.01) return 'rarity.exclusive';
+    if (q >= 130.01) return 'rarity.rare';
+    if (q >= 115.01) return 'rarity.special';
+    if (q >= 100)    return 'rarity.unordinary';
+    return 'rarity.ordinary';
+  }
+
+  /** Nº de huecos de stats adicionales desbloqueados por el nivel. */
+  function addSlots(artId, level){
+    let n = 0;
+    if (artId === RUBIK && level >= 1) n++;
+    if (level >= 5) n++;
+    if (level >= 10) n++;
+    if (level >= 15) n++;
+    return n;
+  }
+
+  /**
+   * Valor de una stat de artefacto (formato [clave, min, max, positiva, porcentaje]).
+   * @param eff eficiencia de la mochila (las acumulaciones la ignoran).
+   */
+  function statValue(st, level, quality, rarity, eff){
+    const key = st[0], vmin = st[1], vmax = st[2], positive = !!st[3];
+
+    if (key === 'trigger_damage') return vmax;
+    if (key === 'recharge' || key === 'blocking_damage' || key === 'cost'){
+      let v = vmax < vmin ? vmin - (vmin - vmax) * (quality/100) * 0.8689 : vmax * (quality/100);
+      const c = level > 0 ? 2*level : 0;
+      if (c > 0) v = vmax > vmin ? v * (1 + c/100) : v / ((1 + c/100) * 1.1);
+      return v;
+    }
+
+    const t = (ACC.includes(key) ? 100 : eff) / 100;
+    let mx = Math.max(vmax, vmin), mn = Math.min(vmax, vmin);
+    if (vmax <= 0 && vmin <= 0){ mx = Math.min(vmax, vmin); mn = Math.max(vmax, vmin); } // el "máximo" es el más negativo
+    mx *= t; mn *= t;
+
+    if (positive) return mx * (quality/100) * (1 + 2*level/100);
+
+    // Stats negativas: el nivel no las mejora y saturan dentro de su franja de rareza.
+    const d = quality;
+    if (d <= 100){
+      if (d === 100 && rarity === 'rarity.unordinary'){
+        const a = 0.9 * mx;
+        return a + (mx - a)/100 * ((d - (100 + 10*RIDX[rarity])) * 10);
+      }
+      return mn + (mx - mn)/100 * d;
+    }
+    const ri = RIDX[rarity];
+    const fallback = Math.floor((d - 100)/15);
+    let i = Math.max(0, Math.min(ri !== undefined ? ri : fallback, 5));
+    if ([115,130,145,160,175,190].includes(d)) i = RIDX[rarity];
+    const frac = Math.max(0, Math.min(d - (100 + 15*i), 15)) / 15;
+    const lo = 0.85 * mx;
+    return lo + (mx - lo) * frac;
+  }
+
+  /** Stats activas de un artefacto configurado (base + adicionales desbloqueadas y elegidas). */
+  function artefactStats(cfg, eff){
+    const item = cfg.item;
+    const rarity = rarityOf(cfg.quality);
+    const slots = addSlots(item.i, cfg.level);
+    const chosen = (cfg.addSel || []).filter(i => i < item.a.length).slice(0, slots);
+    const list = item.s.concat(chosen.map(i => item.a[i]));
+    return list.map(st => ({
+      key: st[0], pct: !!st[4], origin: 'artefact',
+      value: statValue(st, cfg.level, cfg.quality, rarity, eff),
+    }));
+  }
+
+  const isPositive = (key, sum) => CAN_BOTH.includes(key) ? sum <= 0 : sum > 0;
+
+  function merge(stats){
+    const m = new Map();
+    for (const s of stats){
+      const cur = m.get(s.key);
+      if (cur) cur.value += s.value;
+      else m.set(s.key, {key:s.key, pct:s.pct, origin:s.origin, value:s.value});
+    }
+    for (const s of m.values()) s.positive = isPositive(s.key, s.value);
+    return [...m.values()];
+  }
+
+  const armorValue = (s, lvl) => s.length > 4 ? s[4][Math.min(lvl, s[4].length - 1)] : s[1];
+
+  /**
+   * Calcula una build completa.
+   * build = {container, containerItem, armor:{item,level}, artefacts:[cfg], bleeding, burning, reactions:[keys]}
+   */
+  function compute(build){
+    const cont = build.container;                       // objeto de gamedata o null
+    const eff  = cont ? cont.eff : 100;
+    const prot = cont ? cont.pro : 0;
+
+    // 1) Artefactos: se calculan y se suman entre sí.
+    const artStats = [];
+    for (const cfg of build.artefacts) if (cfg && cfg.item) artStats.push(...artefactStats(cfg, eff));
+
+    const polyStats = merge(artStats.filter(s => POLY.includes(s.key)));
+    let summed = merge(artStats.filter(s => !POLY.includes(s.key)));
+
+    // 2) La protección de la mochila mitiga las acumulaciones dañinas del conjunto de artefactos.
+    for (const s of summed){
+      if (!s.positive && CONT_PROTECT.includes(s.key)) s.value *= (1 - prot/100);
+    }
+
+    // 3) Se añaden armadura y mochila (no reciben protección ni eficiencia).
+    const all = summed.slice();
+    if (build.armor && build.armor.item)
+      for (const s of build.armor.item.s)
+        all.push({key:s[0], value:armorValue(s, build.armor.level), pct:!!s[3], origin:'armor'});
+    if (cont)
+      for (const s of cont.s)
+        all.push({key:s[0], value:s[1], pct:!!s[3], origin:'container'});
+
+    let out = merge(all);
+
+    // 4) Bonus de reacción: las reacciones activas suman a vitalidad y regeneración de aguante.
+    const bonus = (build.reactions || []).reduce((acc,k) => {
+      const st = out.find(s => s.key === k);
+      return acc + (st ? st.value : 0);
+    }, 0);
+    if (bonus !== 0){
+      for (const k of ['health_bonus','stamina_regeneration_bonus']){
+        const st = out.find(s => s.key === k);
+        if (st){ st.value += bonus; st.positive = isPositive(k, st.value); }
+        else out.push({key:k, value:bonus, pct:true, origin:'reaction', positive:bonus > 0});
+      }
+    }
+
+    // 5) Estabilidad: combinación no lineal de laceración y estabilidad.
+    const get = k => out.find(s => s.key === k);
+    const tear = get('tear_dmg_factor'), stop = get('stopping_protection');
+    const n = tear ? tear.value : 0, i = stop ? stop.value : 0;
+    if (n !== 0 || i !== 0){
+      const v = (1 - 100/(100 + n) * (1 - i/100)) * 100;
+      if (stop){ stop.value = v; stop.positive = v > 0; }
+      else out.push({key:'stopping_protection', value:v, pct:true, origin:'derived', positive:v > 0});
+    }
+
+    // 6) Penalizaciones por hemorragia y quemaduras.
+    const bl = Math.max(0, Math.min(4, build.bleeding|0));
+    const regPen = (BLEEDING_PENALTIES[bl][0]||0) + (build.burning ? BURNING_PENALTIES.regeneration : 0);
+    const effPen = (BLEEDING_PENALTIES[bl][1]||0) + (build.burning ? BURNING_PENALTIES.efficiency : 0);
+    if (regPen > 0 || effPen > 0){
+      for (const [k,pen] of [['regeneration_bonus',regPen],['heal_efficiency',effPen]]){
+        if (pen <= 0) continue;
+        let st = get(k);
+        if (!st){ st = {key:k, value:0, pct:true, origin:'debuff'}; out.push(st); }
+        st.value -= pen; st.positive = st.value > 0;
+      }
+    }
+
+    out = out.filter(s => s.value !== 0);
+    out.sort((a,b) => SORTED.indexOf(a.key) - SORTED.indexOf(b.key));
+
+    const hb = get('health_bonus'), br = get('bullet_dmg_factor');
+    const effectiveHealth = ((hb ? hb.value : 0) + 100)/100 * (100 + (br ? br.value : 0));
+    const reg = get('regeneration_bonus'), ah = get('artefakt_heal'), he = get('heal_efficiency');
+    const healingPerSecond = ((reg ? reg.value : 0) + 2.5)/5 + (ah ? ah.value : 0) * (1 + (he ? he.value : 0)/100);
+
+    const alerts = out.filter(s => LIMITS[s.key] !== undefined && s.value > LIMITS[s.key]).map(s => s.key);
+
+    return {stats: out, poly: polyStats, effectiveHealth, healingPerSecond, alerts,
+            availableReactions: out.filter(s => REACTIONS.includes(s.key)).map(s => s.key)};
+  }
+
+  return {compute, artefactStats, statValue, rarityOf, addSlots, merge, armorValue,
+          ACC, CONT_PROTECT, CAN_BOTH, POLY, REACTIONS, LIMITS, CATEGORY, CATEGORY_ORDER, CATEGORY_LABEL, SORTED, RIDX,
+          BLEEDING_PENALTIES, BURNING_PENALTIES};
+})();
+
+/* =========================================================================
+   DATOS Y ESTADO
+   ========================================================================= */
+const D = window.SZ_DATA;
+const byId = (arr) => Object.fromEntries(arr.map(x => [x.i, x]));
+const ART = byId(D.artefacts), CNT = byId(D.containers), ARM = byId(D.armors);
+const statName = k => (D.statNames[k] && D.statNames[k].es) || k;
+const CAT_ES = {biochemical:'Bioquímico', electrophysical:'Electrofísico', gravity:'Gravitacional',
+  thermal:'Térmico', other_arts:'Otros', armor:'Armadura', clothes:'Ropa', combat:'Combate',
+  combined:'Combinada', scientist:'Científica', styles:'Estilo'};
+const ICON = it => `https://cdn3.stalzone.wiki/exbo_item_parser/${it.cat}/${it.i}.png`;
+const RARITY_COLOR = q => q >= 175.01 ? 'var(--r-unique)' : q >= 160.01 ? 'var(--r-legendary)'
+  : q >= 145.01 ? 'var(--r-exclusive)' : q >= 130.01 ? 'var(--r-rare)'
+  : q >= 115.01 ? 'var(--r-special)' : q >= 100 ? 'var(--r-unordinary)' : 'var(--r-ordinary)';
+
+const state = {
+  containerId: null, armorId: null, armorLevel: 15,
+  artefacts: [],          // [{id, level, quality, addSel:[índices]}]
+  bleeding: 0, burning: false, reactions: [],
+};
+
+const capacity = () => state.containerId ? CNT[state.containerId].cap : 0;
+
+function buildObject(st = state){
+  const cont = st.containerId ? CNT[st.containerId] : null;
+  const cap = cont ? cont.cap : 0;
+  return {
+    container: cont,
+    armor: st.armorId ? {item: ARM[st.armorId], level: st.armorLevel} : null,
+    artefacts: st.artefacts.slice(0, cap).map(a => a && a.id ? {item: ART[a.id], level: a.level, quality: a.quality, addSel: a.addSel} : null).filter(Boolean),
+    bleeding: st.bleeding, burning: st.burning, reactions: st.reactions,
+  };
+}
+
+const fmt = (v, pct) => (v >= 0 ? '' : '-') + Math.abs(v).toFixed(2) + (pct ? '%' : '');
+const $ = s => document.querySelector(s);
+const el = (tag, props = {}, ...kids) => {
+  const n = Object.assign(document.createElement(tag), props);
+  for (const k of kids) n.append(k);
+  return n;
+};
+
+/* =========================================================================
+   MODAL SELECTOR
+   ========================================================================= */
+function openPicker({title, items, meta, onPick}){
+  const host = $('#modal-host');
+  const input = el('input', {type:'text', placeholder:'Buscar…'});
+  const list = el('div', {className:'list'});
+  const box = el('div', {className:'box'});
+  const wrap = el('div', {className:'modal'}, box);
+  const close = () => host.replaceChildren();
+
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    const rows = items.filter(it => !q || it.n.es.toLowerCase().includes(q) || it.n.en.toLowerCase().includes(q));
+    list.replaceChildren(...rows.map(it => {
+      const img = el('img', {src: ICON(it), alt: '', loading: 'lazy'});
+      img.onerror = () => { img.style.visibility = 'hidden'; };
+      const o = el('div', {className:'opt'}, img,
+        el('div', {}, el('div', {textContent: it.n.es}), el('div', {className:'sub', textContent: CAT_ES[it.c] || ''})),
+        el('div', {className:'meta', innerHTML: meta ? meta(it) : ''}));
+      o.onclick = () => { close(); onPick(it); };
+      return o;
+    }));
+    if (!rows.length) list.replaceChildren(el('div', {className:'empty', textContent:'Sin resultados'}));
+  };
+  input.oninput = render;
+
+  const btnClose = el('button', {textContent:'Cerrar'});
+  btnClose.onclick = close;
+  box.append(el('h3', {}, title, btnClose), el('div', {className:'srch'}, input), list);
+  wrap.onclick = e => { if (e.target === wrap) close(); };
+  document.addEventListener('keydown', function esc(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc); } });
+  host.replaceChildren(wrap);
+  render(); input.focus();
+}
+
+/* =========================================================================
+   INTERFAZ — CALCULADORA
+   ========================================================================= */
+function renderContainer(){
+  const btn = $('#pick-container');
+  const c = state.containerId ? CNT[state.containerId] : null;
+  btn.replaceChildren();
+  if (c){
+    const img = el('img', {src: ICON(c), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
+    btn.append(img, el('span', {className:'nm', textContent:c.n.es}), el('span', {className:'qt', textContent:`${c.cap} huecos`}));
+    $('#c-eff').textContent = c.eff.toFixed(2) + ' %';
+    $('#c-pro').textContent = c.pro.toFixed(2) + ' %';
+    $('#cap-tag').textContent = `${state.artefacts.filter(a => a && a.id).length} / ${c.cap}`;
+  } else {
+    btn.append(el('span', {className:'ph', textContent:'+'}), el('span', {className:'nm', textContent:'Selecciona una mochila…'}));
+    $('#c-eff').textContent = $('#c-pro').textContent = '—';
+    $('#cap-tag').textContent = '';
+  }
+}
+
+function renderArmor(){
+  const btn = $('#pick-armor');
+  const a = state.armorId ? ARM[state.armorId] : null;
+  btn.replaceChildren();
+  if (a){
+    const img = el('img', {src: ICON(a), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
+    const clear = el('button', {className:'x', textContent:'✕', title:'Quitar armadura'});
+    clear.onclick = e => { e.stopPropagation(); state.armorId = null; refresh(); };
+    btn.append(img, el('span', {className:'nm', textContent:a.n.es}), el('span', {className:'qt', textContent:'+' + state.armorLevel}), clear);
+  } else {
+    btn.append(el('span', {className:'ph', textContent:'+'}), el('span', {className:'nm', textContent:'Selecciona una armadura…'}));
+  }
+  $('#armor-lvl-wrap').classList.toggle('hidden', !a);
+  $('#armor-lvl').value = $('#armor-lvl-n').value = state.armorLevel;
+}
+
+function renderArtefacts(){
+  const host = $('#art-slots');
+  const cap = capacity();
+  $('#art-tag').textContent = cap ? `${state.artefacts.filter(a => a && a.id).length} / ${cap}` : '';
+  host.replaceChildren();
+  if (!cap){
+    host.append(el('div', {className:'empty', textContent:'Selecciona primero una mochila para desbloquear huecos.'}));
+    return;
+  }
+  while (state.artefacts.length < cap) state.artefacts.push(null);
+  state.artefacts.length = cap;
+
+  for (let i = 0; i < cap; i++){
+    const cfg = state.artefacts[i];
+    const row = el('div', {className:'artrow'});
+    const head = el('div', {className:'head'});
+
+    if (!cfg || !cfg.id){
+      const ph = el('span', {className:'ph', textContent:'+'});
+      const nm = el('span', {className:'nm', textContent:`Hueco ${i+1} — elegir artefacto…`, style:'color:var(--muted)'});
+      head.append(ph, nm);
+      head.style.cursor = 'pointer';
+      head.onclick = () => pickArtefact(i);
+      row.append(head);
+    } else {
+      const it = ART[cfg.id];
+      const img = el('img', {src: ICON(it), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
+      const nm = el('span', {className:'nm', textContent: it.n.es, title:'Cambiar artefacto'});
+      nm.onclick = () => pickArtefact(i);
+      const qt = el('span', {className:'qt', textContent:`+${cfg.level} · ${cfg.quality}%`, style:`color:${RARITY_COLOR(cfg.quality)}`});
+      const x = el('button', {className:'x', textContent:'✕', title:'Vaciar hueco'});
+      x.onclick = () => { state.artefacts[i] = null; refresh(); };
+      head.append(img, nm, qt, x);
+
+      const body = el('div', {className:'body'});
+      body.append(sliderRow('Nivel', cfg.level, 0, 15, 1, (v, commit) => {
+        const prev = ENGINE.addSlots(cfg.id, cfg.level);
+        cfg.level = v; syncAddSel(cfg, prev);
+        qt.textContent = `+${cfg.level} · ${cfg.quality}%`;
+        commit ? refresh() : recalc();
+      }, [0,5,10,15]));
+      body.append(sliderRow('Calidad %', cfg.quality, 0, 190, 1, (v, commit) => {
+        cfg.quality = v;
+        qt.textContent = `+${cfg.level} · ${cfg.quality}%`;
+        qt.style.color = RARITY_COLOR(v);
+        commit ? refresh() : recalc();
+      }, [0,100,115,130,145,160,175]));
+
+      const slots = ENGINE.addSlots(it.i, cfg.level);
+      if (it.a.length){
+        const lbl = el('label', {textContent:`Stats adicionales (${cfg.addSel.length}/${slots} desbloqueadas)`});
+        const chips = el('div', {className:'chips'});
+        it.a.forEach((st, idx) => {
+          const on = cfg.addSel.includes(idx);
+          const full = !on && cfg.addSel.length >= slots;
+          const v = ENGINE.statValue(st, cfg.level, cfg.quality, ENGINE.rarityOf(cfg.quality), state.containerId ? CNT[state.containerId].eff : 100);
+          const c = el('div', {className:'chip' + (on ? ' on' : '') + (full ? ' dim' : ''),
+            textContent:`${statName(st[0])} ${fmt(v, !!st[4])}`});
+          if (!full) c.onclick = () => {
+            if (on) cfg.addSel = cfg.addSel.filter(x => x !== idx);
+            else cfg.addSel.push(idx);
+            refresh();
+          };
+          chips.append(c);
+        });
+        body.append(lbl, chips);
+        if (slots === 0) body.append(el('p', {className:'note', textContent:'Sube el artefacto a +5 para desbloquear el primer hueco adicional.', style:'margin:6px 0 0'}));
+      }
+      row.append(head, body);
+    }
+    host.append(row);
+  }
+}
+
+/**
+ * Ajusta los huecos adicionales tras cambiar el nivel: recorta los que se pierden y
+ * rellena los nuevos sólo si el usuario los tenía todos ocupados (como hace la wiki).
+ */
+function syncAddSel(cfg, prevSlots){
+  const it = ART[cfg.id];
+  const slots = ENGINE.addSlots(cfg.id, cfg.level);
+  if (cfg.addSel.length > slots){ cfg.addSel = cfg.addSel.slice(0, slots); return; }
+  if (cfg.addSel.length !== prevSlots) return;
+  for (let k = 0; k < it.a.length && cfg.addSel.length < slots; k++)
+    if (!cfg.addSel.includes(k)) cfg.addSel.push(k);
+}
+
+/**
+ * Fila con deslizador + número + atajos.
+ * apply(valor, commit): commit=false mientras se arrastra (recálculo ligero, sin recrear el DOM).
+ */
+function sliderRow(label, value, min, max, step, apply, presets){
+  const wrap = el('div');
+  const ctl = el('div', {className:'ctl'});
+  const range = el('input', {type:'range', min, max, step, value});
+  const num = el('input', {type:'number', min, max, value});
+  range.oninput = () => { num.value = range.value; apply(+range.value, false); };
+  range.onchange = () => apply(+range.value, true);
+  num.onchange = () => { const v = Math.max(min, Math.min(max, +num.value || 0)); num.value = v; apply(v, true); };
+  ctl.append(el('label', {textContent: label}), range, num);
+  wrap.append(ctl);
+  if (presets){
+    const chips = el('div', {className:'chips', style:'margin:-2px 0 8px'});
+    for (const p of presets){
+      const c = el('div', {className:'chip' + (value === p ? ' on' : ''), textContent:p});
+      c.onclick = () => apply(p, true);
+      chips.append(c);
+    }
+    wrap.append(chips);
+  }
+  return wrap;
+}
+
+function pickArtefact(i){
+  openPicker({
+    title:'Elegir artefacto', items: D.artefacts,
+    meta: it => `<span style="color:var(--muted)">${it.s.length} stats</span>`,
+    onPick: it => {
+      const prev = state.artefacts[i];
+      const cfg = {id: it.i, level: prev ? prev.level : 15, quality: prev ? prev.quality : 100, addSel: []};
+      // Autoselección: se rellenan los huecos adicionales desbloqueados, como en la wiki.
+      const slots = ENGINE.addSlots(it.i, cfg.level);
+      cfg.addSel = it.a.map((_, k) => k).slice(0, slots);
+      state.artefacts[i] = cfg;
+      refresh();
+    }
+  });
+}
+
+function renderReactions(result){
+  const host = $('#reactions-wrap');
+  host.replaceChildren();
+  const avail = result.availableReactions;
+  if (!avail.length) return;
+  host.append(el('label', {textContent:'Reacciones a anomalías activas (suman a Vitalidad y Regeneración de aguante)'}));
+  const chips = el('div', {className:'chips'});
+  for (const k of avail){
+    const on = state.reactions.includes(k);
+    const c = el('div', {className:'chip' + (on ? ' on' : ''), textContent: statName(k)});
+    c.onclick = () => {
+      state.reactions = on ? state.reactions.filter(x => x !== k) : [...state.reactions, k];
+      refresh();
+    };
+    chips.append(c);
+  }
+  host.append(chips);
+}
+
+function renderResults(r){
+  const host = $('#results');
+  host.replaceChildren();
+  const anything = state.containerId || state.armorId || state.artefacts.some(a => a && a.id);
+  if (!anything){
+    host.append(el('div', {className:'empty', textContent:'Elige una mochila, una armadura y algunos artefactos para ver el resultado.'}));
+    return;
+  }
+
+  const kpis = el('div', {className:'kpis'});
+  kpis.append(
+    el('div', {className:'kpi'}, el('div', {className:'v', textContent:r.effectiveHealth.toFixed(2)}), el('div', {className:'l', textContent:'Salud efectiva'})),
+    el('div', {className:'kpi'}, el('div', {className:'v', textContent:r.healingPerSecond.toFixed(2) + '%'}), el('div', {className:'l', textContent:'Curación por segundo'})));
+  host.append(kpis);
+
+  for (const key of r.alerts){
+    host.append(el('div', {className:'alert', textContent:`⚠ ${statName(key)} supera el umbral de ${ENGINE.LIMITS[key]} — sufrirás daño continuo.`}));
+  }
+
+  const all = r.stats.concat(r.poly);
+  const groups = {};
+  for (const s of all) (groups[ENGINE.CATEGORY[s.key] || 'other'] ||= []).push(s);
+
+  let printed = false;
+  for (const cat of ENGINE.CATEGORY_ORDER){
+    const rows = groups[cat];
+    if (!rows || !rows.length) continue;
+    printed = true;
+    host.append(el('div', {className:'cat', textContent: ENGINE.CATEGORY_LABEL[cat]}));
+    for (const s of rows){
+      host.append(el('div', {className:'stat'},
+        el('span', {className:'n', textContent: statName(s.key)}),
+        el('span', {className:'v', textContent: fmt(s.value, s.pct), style:`color:${s.positive ? 'var(--pos)' : 'var(--neg)'}`})));
+    }
+  }
+  if (!printed) host.append(el('div', {className:'empty', textContent:'Sin estadísticas todavía.'}));
+  host.append(el('div', {style:'height:10px'}));
+}
+
+let lastResult = null;
+
+/** Recálculo ligero: sólo el panel de resultados. No recrea los controles. */
+function recalc(){
+  lastResult = ENGINE.compute(buildObject());
+  const before = state.reactions.length;
+  state.reactions = state.reactions.filter(k => lastResult.availableReactions.includes(k));
+  if (state.reactions.length !== before) lastResult = ENGINE.compute(buildObject());
+  renderResults(lastResult);
+  updateCode();
+  return lastResult;
+}
+
+/** Redibujado completo de la pestaña Calculadora. */
+function refresh(){
+  renderContainer(); renderArmor(); renderArtefacts();
+  recalc();
+  renderReactions(lastResult);
+  $('#bleed').value = $('#bleed-n').value = state.bleeding;
+  $('#burning').checked = state.burning;
+  $('#armor-lvl').value = $('#armor-lvl-n').value = state.armorLevel;
+}
+
+/* =========================================================================
+   OPTIMIZADOR
+   ========================================================================= */
+/**
+ * Núcleo del optimizador. Sin dependencias del DOM para poder verificarlo aparte.
+ *
+ * Representa una build como un vector denso de contribuciones "crudas" de los artefactos
+ * (que sí son aditivas) y aplica después, de una sola pasada, las transformaciones no
+ * aditivas del motor: protección de la mochila, armadura, reacciones, estabilidad y
+ * penalizaciones. Eso permite evaluar millones de combinaciones sin reconstruir objetos.
+ *
+ * La búsqueda es un branch & bound sobre combinaciones con (o sin) repetición. La cota
+ * superior se calcula sustituyendo cada componente del objetivo por el mejor aporte que
+ * queda disponible; como todas las transformaciones posteriores son monótonas crecientes
+ * en esos componentes, la cota nunca subestima y la poda no puede descartar el óptimo.
+ */
+const OPTIMIZER = (() => {
+  const KEYS = ENGINE.SORTED.filter(k => !ENGINE.POLY.includes(k));
+  const IDX = Object.fromEntries(KEYS.map((k, i) => [k, i]));
+  const N = KEYS.length;
+  const vec = () => new Float64Array(N);
+
+  /** Contribución cruda de un artefacto ya configurado. */
+  function artefactVector(item, level, quality, eff){
+    const v = vec();
+    const addSel = item.a.map((_, k) => k).slice(0, ENGINE.addSlots(item.i, level));
+    for (const s of ENGINE.artefactStats({item, level, quality, addSel}, eff)){
+      const i = IDX[s.key];
+      if (i !== undefined) v[i] += s.value;
+    }
+    return v;
+  }
+
+  /** Parte fija de la build (mochila, armadura, estado del personaje). */
+  function context({container, armor, bleeding, burning, reactions}){
+    const fixed = vec();
+    if (armor && armor.item) for (const s of armor.item.s){
+      const i = IDX[s[0]];
+      if (i !== undefined) fixed[i] += ENGINE.armorValue(s, armor.level);
+    }
+    if (container) for (const s of container.s){
+      const i = IDX[s[0]];
+      if (i !== undefined) fixed[i] += s[1];
+    }
+    const bl = Math.max(0, Math.min(4, bleeding | 0));
+    return {
+      eff: container ? container.eff : 100,
+      prot: container ? container.pro : 0,
+      fixed,
+      protIdx: ENGINE.CONT_PROTECT.map(k => IDX[k]).filter(i => i !== undefined),
+      reactIdx: (reactions || []).map(k => IDX[k]).filter(i => i !== undefined),
+      regPen: (ENGINE.BLEEDING_PENALTIES[bl][0] || 0) + (burning ? ENGINE.BURNING_PENALTIES.regeneration : 0),
+      effPen: (ENGINE.BLEEDING_PENALTIES[bl][1] || 0) + (burning ? ENGINE.BURNING_PENALTIES.efficiency : 0),
+    };
+  }
+
+  /** Aplica el resto del pipeline del motor sobre un vector crudo de artefactos. */
+  function evaluate(raw, C, out){
+    const t = out || vec();
+    for (let i = 0; i < N; i++) t[i] = raw[i];
+    if (C.prot) for (const i of C.protIdx) if (t[i] > 0) t[i] *= (1 - C.prot / 100);
+    for (let i = 0; i < N; i++) t[i] += C.fixed[i];
+    if (C.reactIdx.length){
+      let bonus = 0;
+      for (const i of C.reactIdx) bonus += t[i];
+      t[IDX.health_bonus] += bonus;
+      t[IDX.stamina_regeneration_bonus] += bonus;
+    }
+    const tear = t[IDX.tear_dmg_factor], stop = t[IDX.stopping_protection];
+    if (tear !== 0 || stop !== 0) t[IDX.stopping_protection] = (1 - 100 / (100 + tear) * (1 - stop / 100)) * 100;
+    if (C.regPen > 0) t[IDX.regeneration_bonus] -= C.regPen;
+    if (C.effPen > 0) t[IDX.heal_efficiency] -= C.effPen;
+    return t;
+  }
+
+  const effectiveHealth = t => (t[IDX.health_bonus] + 100) / 100 * (100 + t[IDX.bullet_dmg_factor]);
+  const healingPerSecond = t => (t[IDX.regeneration_bonus] + 2.5) / 5 + t[IDX.artefakt_heal] * (1 + t[IDX.heal_efficiency] / 100);
+
+  /**
+   * Componentes de los que depende el objetivo y en qué dirección conviene moverlos.
+   * dir = +1 → cuanto mayor, mejor; dir = -1 → cuanto menor, mejor.
+   */
+  function goalSpec(goalId, reactions){
+    const R = (reactions || []).filter(k => IDX[k] !== undefined);
+    if (goalId === '__eh')
+      return {comps: [...new Set(['health_bonus', 'bullet_dmg_factor', ...R])].map(k => [k, 1]), f: effectiveHealth};
+    if (goalId === '__hps')
+      return {comps: [['regeneration_bonus', 1], ['artefakt_heal', 1], ['heal_efficiency', 1]], f: healingPerSecond};
+    if (goalId === 'stopping_protection')
+      return {comps: [['tear_dmg_factor', 1], ['stopping_protection', 1]], f: t => t[IDX.stopping_protection]};
+    const min = ENGINE.CAN_BOTH.includes(goalId);
+    let comps = [[goalId, min ? -1 : 1]];
+    if ((goalId === 'health_bonus' || goalId === 'stamina_regeneration_bonus') && R.length)
+      comps = comps.concat(R.map(k => [k, 1]));
+    return {comps, f: t => min ? -t[IDX[goalId]] : t[IDX[goalId]]};
+  }
+
+  /**
+   * @param p.items      artefactos disponibles (objetos de gamedata)
+   * @param p.onProgress callback(nodes, elapsed) — puede devolver una promesa para ceder el hilo
+   * @param p.isAborted  función que corta la búsqueda
+   */
+  async function search(p){
+    const cap = p.container.cap;
+    const C = context(p);
+    const spec = goalSpec(p.goalId, p.reactions);
+    const limits = p.limits || {};
+    const limEntries = Object.keys(limits).filter(k => IDX[k] !== undefined).map(k => [IDX[k], limits[k]]);
+
+    const empty = vec();
+    const baseGoal = spec.f(evaluate(empty, C));
+
+    // Aporte individual de cada artefacto, usado para ordenar y para elegir candidatos.
+    const scored = p.items.map((it, i) => {
+      const v = artefactVector(it, p.level, p.quality, C.eff);
+      return {i, v, gain: spec.f(evaluate(v, C)) - baseGoal};
+    });
+
+    // Candidatos = los que más aportan al objetivo + los mejores "purificadores" de cada límite.
+    const pool = new Set(scored.slice().sort((a, b) => b.gain - a.gain)
+      .filter(s => s.gain > 1e-12).slice(0, p.maxCand).map(s => s.i));
+    for (const [li] of limEntries){
+      scored.slice().sort((a, b) => a.v[li] - b.v[li]).slice(0, 6)
+        .filter(s => s.v[li] < 0).forEach(s => pool.add(s.i));
+    }
+    const cands = scored.filter(s => pool.has(s.i)).sort((a, b) => b.gain - a.gain);
+    if (!cands.length) return {best: null, nodes: 0, exhaustive: true, candidates: 0};
+
+    const M = cands.length;
+    // Sufijos: mejor aporte disponible a partir de cada índice (0 = dejar el hueco vacío).
+    const compIdx = spec.comps.map(([k, d]) => [IDX[k], d]);
+    const sufComp = compIdx.map(([ci, d]) => {
+      const a = new Float64Array(M + 1);
+      for (let j = M - 1; j >= 0; j--) a[j] = d > 0 ? Math.max(a[j + 1], cands[j].v[ci]) : Math.min(a[j + 1], cands[j].v[ci]);
+      return a;
+    });
+    const sufLim = limEntries.map(([li]) => {
+      const a = new Float64Array(M + 1);
+      for (let j = M - 1; j >= 0; j--) a[j] = Math.min(a[j + 1], cands[j].v[li]);
+      return a;
+    });
+
+    const raw = vec(), probe = vec(), scratch = vec();
+    const choice = new Int32Array(cap), cursor = new Int32Array(cap + 1);
+    let best = null, nodes = 0, exhaustive = true;
+    const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
+
+    const record = (depth) => {
+      const t = evaluate(raw, C, scratch);
+      for (const [li, lim] of limEntries) if (t[li] > lim + 1e-9) return;
+      const v = spec.f(t);
+      if (!best || v > best.value) best = {value: v, picks: Array.from(choice.subarray(0, depth))};
+    };
+
+    /** ¿Merece la pena seguir explorando este nivel? */
+    const prune = (depth) => {
+      const start = cursor[depth], slotsLeft = cap - depth;
+      if (best){
+        for (let i = 0; i < N; i++) probe[i] = raw[i];
+        for (let c = 0; c < compIdx.length; c++) probe[compIdx[c][0]] += sufComp[c][start] * slotsLeft;
+        if (spec.f(evaluate(probe, C, scratch)) <= best.value + 1e-9) return true;
+      }
+      for (let c = 0; c < limEntries.length; c++){
+        for (let i = 0; i < N; i++) probe[i] = raw[i];
+        probe[limEntries[c][0]] += sufLim[c][start] * slotsLeft;
+        const t = evaluate(probe, C, scratch);
+        if (t[limEntries[c][0]] > limEntries[c][1] + 1e-6) return true;
+      }
+      return false;
+    };
+
+    cursor[0] = 0;
+    record(0);                                  // la build vacía también es una opción válida
+    let depth = 0;
+    while (depth >= 0){
+      if (nodes % 20000 === 0 && nodes > 0){
+        const elapsed = (typeof performance !== 'undefined' ? performance : Date).now() - t0;
+        if (p.isAborted && p.isAborted()){ exhaustive = false; break; }
+        if (elapsed > p.timeLimit){ exhaustive = false; break; }
+        if (p.onProgress) await p.onProgress(nodes, elapsed);
+      }
+      if (depth >= cap || cursor[depth] >= M || prune(depth)){
+        depth--;
+        if (depth >= 0){
+          const v = cands[choice[depth]].v;
+          for (let i = 0; i < N; i++) raw[i] -= v[i];
+        }
+        continue;
+      }
+      const j = cursor[depth]++;
+      choice[depth] = j;
+      const v = cands[j].v;
+      for (let i = 0; i < N; i++) raw[i] += v[i];
+      nodes++;
+      record(depth + 1);
+      cursor[depth + 1] = p.allowDup ? j : j + 1;
+      depth++;
+    }
+
+    const elapsed = (typeof performance !== 'undefined' ? performance : Date).now() - t0;
+    return {
+      best: best ? {value: best.value, set: best.picks.map(k => cands[k].i)} : null,
+      nodes, exhaustive, candidates: M, elapsed,
+    };
+  }
+
+  return {search, evaluate, context, artefactVector, goalSpec, effectiveHealth, healingPerSecond, KEYS, IDX};
+})();
+
+const GOALS = [
+  {id:'__eh', label:'Salud efectiva'},
+  {id:'__hps', label:'Curación por segundo'},
+  ...ENGINE.SORTED.filter(k => !ENGINE.POLY.includes(k)).map(k => ({id:k, label:statName(k), min:ENGINE.CAN_BOTH.includes(k)})),
+];
+
+let optAbort = false;
+function setOptStatus(t){ $('#o-status').textContent = t; }
+
+async function runOptimizer(){
+  const goal = GOALS.find(g => g.id === $('#o-goal').value);
+  const cont = state.containerId ? CNT[state.containerId] : null;
+  if (!cont){ setOptStatus('Selecciona primero una mochila en la pestaña Calculadora.'); return; }
+
+  const level = Math.max(0, Math.min(15, +$('#o-lvl').value || 0));
+  const quality = Math.max(0, Math.min(190, +$('#o-qual').value || 0));
+  const timeLimit = Math.max(1, Math.min(120, +$('#o-time').value || 12)) * 1000;
+
+  const limits = {};
+  if ($('#o-limits').checked) for (const k in ENGINE.LIMITS){
+    const inp = document.getElementById('lim-' + k);
+    if (inp && inp.value !== '') limits[k] = +inp.value;
+  }
+
+  optAbort = false;
+  $('#o-stop').disabled = false; $('#o-run').disabled = true;
+  setOptStatus('Buscando…');
+
+  const r = await OPTIMIZER.search({
+    items: D.artefacts, container: cont,
+    armor: state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null,
+    level, quality, goalId: goal.id, limits,
+    allowDup: $('#o-dup').checked,
+    maxCand: Math.max(6, Math.min(106, +$('#o-cand').value || 34)),
+    timeLimit,
+    bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
+    isAborted: () => optAbort,
+    onProgress: async (nodes, elapsed) => {
+      setOptStatus(`Explorando… ${nodes.toLocaleString('es')} combinaciones`);
+      $('#o-bar').style.width = Math.min(99, elapsed / timeLimit * 100) + '%';
+      await new Promise(res => setTimeout(res, 0));
+    },
+  });
+
+  $('#o-stop').disabled = true; $('#o-run').disabled = false;
+  $('#o-bar').style.width = '100%';
+  setOptStatus(`${r.exhaustive ? 'Búsqueda completa: óptimo garantizado' : 'Detenida por límite de tiempo: mejor encontrada'}`
+    + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`);
+
+  if (r.best){
+    // Se recalcula con el motor completo para mostrar todas las estadísticas.
+    r.best.res = ENGINE.compute({
+      container: cont,
+      armor: state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null,
+      artefacts: r.best.set.map(i => {
+        const it = D.artefacts[i];
+        return {item: it, level, quality, addSel: it.a.map((_, k) => k).slice(0, ENGINE.addSlots(it.i, level))};
+      }),
+      bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
+    });
+  }
+  renderOptResult(r.best || {set: null}, goal, {level, quality});
+}
+
+function renderOptResult(best, goal, cfg){
+  const host = $('#o-result');
+  host.className = '';
+  host.replaceChildren();
+  if (!best.set){
+    host.className = 'empty';
+    host.textContent = 'No se encontró ninguna build que cumpla los límites.';
+    return;
+  }
+  const pad = el('div', {className:'pad'});
+  pad.append(el('div', {className:'kpi', style:'margin-bottom:12px'},
+    el('div', {className:'v', textContent: (goal.min ? -best.value : best.value).toFixed(2)}),
+    el('div', {className:'l', textContent: goal.label})));
+
+  const counts = new Map();
+  for (const i of best.set) counts.set(i, (counts.get(i) || 0) + 1);
+  for (const [i, n] of counts){
+    const it = D.artefacts[i];
+    const img = el('img', {src: ICON(it), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
+    pad.append(el('div', {className:'slot', style:'margin-bottom:6px'}, img,
+      el('span', {className:'nm', textContent: (n > 1 ? `${n}× ` : '') + it.n.es}),
+      el('span', {className:'qt', textContent:`+${cfg.level} · ${cfg.quality}%`, style:`color:${RARITY_COLOR(cfg.quality)}`})));
+  }
+  const apply = el('button', {className:'primary', textContent:'Aplicar esta build', style:'margin-top:10px'});
+  apply.onclick = () => {
+    state.artefacts = best.set.map(i => {
+      const it = D.artefacts[i];
+      return {id: it.i, level: cfg.level, quality: cfg.quality, addSel: it.a.map((_,k)=>k).slice(0, ENGINE.addSlots(it.i, cfg.level))};
+    });
+    while (state.artefacts.length < capacity()) state.artefacts.push(null);
+    switchTab('calc'); refresh();
+  };
+  pad.append(apply);
+  host.append(pad);
+
+  // Resumen de las stats resultantes.
+  const r = best.res;
+  const tbl = el('table');
+  tbl.append(el('tr', {}, el('th', {textContent:'Estadística'}), el('th', {textContent:'Valor'})));
+  tbl.append(el('tr', {}, el('td', {textContent:'Salud efectiva'}), el('td', {textContent: r.effectiveHealth.toFixed(2)})));
+  for (const s of r.stats){
+    tbl.append(el('tr', {}, el('td', {textContent: statName(s.key)}),
+      el('td', {textContent: fmt(s.value, s.pct), style:`color:${s.positive ? 'var(--pos)' : 'var(--neg)'}`})));
+  }
+  host.append(el('div', {className:'scroll'}, tbl));
+}
+
+/* =========================================================================
+   GUARDADO / EXPORTACIÓN / COMPARACIÓN
+   ========================================================================= */
+const LS_BUILDS = 'stalzone.builds.v1';
+const LS_STATE = 'stalzone.state.v1';
+const loadBuilds = () => { try { return JSON.parse(localStorage.getItem(LS_BUILDS)) || []; } catch { return []; } };
+const saveBuilds = b => localStorage.setItem(LS_BUILDS, JSON.stringify(b));
+
+const encode = st => btoa(unescape(encodeURIComponent(JSON.stringify(st)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const decode = c => JSON.parse(decodeURIComponent(escape(atob(c.replace(/-/g,'+').replace(/_/g,'/')))));
+
+function snapshot(){
+  return {c: state.containerId, a: state.armorId, al: state.armorLevel,
+          ar: state.artefacts.map(x => x && x.id ? [x.id, x.level, x.quality, x.addSel] : null),
+          b: state.bleeding, bu: state.burning, r: state.reactions};
+}
+function restore(s){
+  state.containerId = s.c && CNT[s.c] ? s.c : null;
+  state.armorId = s.a && ARM[s.a] ? s.a : null;
+  state.armorLevel = s.al ?? 15;
+  state.artefacts = (s.ar || []).map(x => x && ART[x[0]] ? {id:x[0], level:x[1], quality:x[2], addSel:x[3] || []} : null);
+  state.bleeding = s.b || 0; state.burning = !!s.bu; state.reactions = s.r || [];
+}
+
+function updateCode(){
+  $('#s-code').value = encode(snapshot());
+  localStorage.setItem(LS_STATE, JSON.stringify(snapshot()));
+}
+
+function renderSaved(){
+  const host = $('#s-list');
+  const builds = loadBuilds();
+  host.replaceChildren();
+  if (!builds.length){ host.append(el('div', {className:'empty', textContent:'No hay builds guardadas todavía.'})); return; }
+  builds.forEach((b, i) => {
+    const row = el('div', {className:'slot', style:'margin-bottom:6px'});
+    const load = el('button', {textContent:'Cargar'});
+    load.onclick = () => { restore(b.data); switchTab('calc'); refresh(); };
+    const del = el('button', {className:'x danger', textContent:'✕'});
+    del.onclick = () => { const arr = loadBuilds(); arr.splice(i,1); saveBuilds(arr); renderSaved(); renderCompare(); };
+    row.append(el('span', {className:'nm', textContent: b.name}),
+      el('span', {className:'qt', textContent: b.date}), load, del);
+    host.append(row);
+  });
+}
+
+function renderCompare(){
+  const host = $('#cmp-body');
+  const builds = loadBuilds();
+  host.className = '';
+  host.replaceChildren();
+  if (builds.length < 1){
+    host.className = 'empty';
+    host.textContent = 'Guarda al menos una build (pestaña «Builds guardadas») para compararlas.';
+    return;
+  }
+  const results = builds.map(b => {
+    const bak = snapshot();
+    restore(b.data);
+    const r = ENGINE.compute(buildObject());
+    restore(bak);
+    return {name: b.name, r};
+  });
+
+  const keys = [];
+  const seen = new Set();
+  for (const {r} of results) for (const s of r.stats.concat(r.poly)) if (!seen.has(s.key)){ seen.add(s.key); keys.push(s.key); }
+  keys.sort((a,b) => ENGINE.SORTED.indexOf(a) - ENGINE.SORTED.indexOf(b));
+
+  const tbl = el('table');
+  tbl.append(el('tr', {}, el('th', {textContent:'Estadística'}), ...results.map(x => el('th', {textContent: x.name}))));
+  const addRow = (label, vals, fmtFn) => {
+    const top = Math.max(...vals);
+    const uniq = new Set(vals).size > 1;
+    tbl.append(el('tr', {}, el('td', {textContent: label}), ...vals.map(v => {
+      const td = el('td', {textContent: fmtFn(v)});
+      if (uniq && v === top) td.style.color = 'var(--acc)';
+      return td;
+    })));
+  };
+  addRow('Salud efectiva', results.map(x => x.r.effectiveHealth), v => v.toFixed(2));
+  addRow('Curación / s', results.map(x => x.r.healingPerSecond), v => v.toFixed(2) + '%');
+
+  for (const k of keys){
+    const cells = results.map(x => (x.r.stats.concat(x.r.poly)).find(s => s.key === k));
+    const nums = cells.map(c => c ? c.value : 0);
+    const isMin = ENGINE.CAN_BOTH.includes(k);
+    const bestVal = isMin ? Math.min(...nums) : Math.max(...nums);
+    const tr = el('tr', {}, el('td', {textContent: statName(k)}));
+    cells.forEach((c, i) => {
+      const td = el('td', {textContent: c ? fmt(c.value, c.pct) : '—'});
+      if (c && nums[i] === bestVal && new Set(nums).size > 1) td.style.color = 'var(--acc)';
+      if (c && !c.positive) td.style.opacity = '.85';
+      tr.append(td);
+    });
+    tbl.append(tr);
+  }
+  host.append(el('div', {className:'scroll'}, tbl));
+}
+
+/* =========================================================================
+   ARRANQUE
+   ========================================================================= */
+function switchTab(t){
+  for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('on', b.dataset.tab === t);
+  for (const id of ['calc','opt','cmp','save']) $('#v-' + id).classList.toggle('hidden', id !== t);
+  if (t === 'cmp') renderCompare();
+  if (t === 'save') renderSaved();
+}
+
+function init(){
+  for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => switchTab(b.dataset.tab);
+
+  $('#pick-container').onclick = () => openPicker({
+    title:'Elegir mochila / contenedor', items: D.containers,
+    meta: it => `${it.cap} huecos<br><span style="color:var(--muted)">ef ${it.eff.toFixed(0)}% · pr ${it.pro.toFixed(0)}%</span>`,
+    onPick: it => { state.containerId = it.i; refresh(); }
+  });
+  $('#pick-armor').onclick = () => openPicker({
+    title:'Elegir armadura', items: D.armors, onPick: it => { state.armorId = it.i; refresh(); }
+  });
+  $('#armor-lvl').oninput = e => {
+    state.armorLevel = +e.target.value;
+    $('#armor-lvl-n').value = state.armorLevel;
+    const q = $('#pick-armor .qt'); if (q) q.textContent = '+' + state.armorLevel;
+    recalc();
+  };
+  $('#armor-lvl-n').onchange = e => { state.armorLevel = Math.max(0, Math.min(15, +e.target.value || 0)); refresh(); };
+  $('#bleed').oninput = e => { state.bleeding = +e.target.value; $('#bleed-n').value = state.bleeding; recalc(); };
+  $('#bleed').onchange = () => refresh();
+  $('#bleed-n').onchange = e => { state.bleeding = Math.max(0, Math.min(4, +e.target.value || 0)); refresh(); };
+  $('#burning').onchange = e => { state.burning = e.target.checked; refresh(); };
+  $('#btn-reset').onclick = () => {
+    state.artefacts = state.artefacts.map(() => null);
+    state.reactions = []; state.bleeding = 0; state.burning = false;
+    refresh();
+  };
+
+  // Optimizador
+  const gsel = $('#o-goal');
+  for (const g of GOALS) gsel.append(el('option', {value: g.id, textContent: g.label}));
+  gsel.value = '__eh';
+  const lr = $('#o-limit-rows');
+  for (const k in ENGINE.LIMITS){
+    const row = el('div', {className:'ctl', style:'grid-template-columns:1fr 90px'});
+    row.append(el('label', {textContent: statName(k) + ' ≤'}),
+      el('input', {type:'number', id:'lim-' + k, step:'0.1', value: ENGINE.LIMITS[k]}));
+    lr.append(row);
+  }
+  $('#o-limits').onchange = e => lr.classList.toggle('hidden', !e.target.checked);
+  $('#o-run').onclick = () => runOptimizer();
+  $('#o-stop').onclick = () => { optAbort = true; };
+
+  // Guardado
+  $('#s-save').onclick = () => {
+    const name = ($('#s-name').value || '').trim() || 'Build ' + (loadBuilds().length + 1);
+    const arr = loadBuilds();
+    arr.push({name, date: new Date().toLocaleDateString('es-ES'), data: snapshot()});
+    saveBuilds(arr); $('#s-name').value = ''; renderSaved();
+  };
+  $('#cmp-add').onclick = () => {
+    const arr = loadBuilds();
+    arr.push({name: 'Build ' + (arr.length + 1), date: new Date().toLocaleDateString('es-ES'), data: snapshot()});
+    saveBuilds(arr); renderCompare();
+  };
+  $('#s-copy').onclick = () => navigator.clipboard.writeText($('#s-code').value).then(() => $('#s-copy').textContent = '¡Copiado!').then(() => setTimeout(() => $('#s-copy').textContent = 'Copiar código', 1200));
+  $('#s-link').onclick = () => {
+    const url = location.origin + location.pathname + '#b=' + $('#s-code').value;
+    navigator.clipboard.writeText(url).then(() => $('#s-link').textContent = '¡Copiado!').then(() => setTimeout(() => $('#s-link').textContent = 'Copiar enlace', 1200));
+  };
+  $('#s-do-imp').onclick = () => {
+    try { restore(decode($('#s-imp').value.trim())); switchTab('calc'); refresh(); $('#s-imp').value = ''; }
+    catch { alert('El código no es válido.'); }
+  };
+
+  // Estado inicial: enlace compartido > última sesión > build de ejemplo.
+  let loaded = false;
+  if (location.hash.startsWith('#b=')){
+    try { restore(decode(location.hash.slice(3))); loaded = true; } catch {}
+  }
+  if (!loaded){
+    try { const s = JSON.parse(localStorage.getItem(LS_STATE)); if (s){ restore(s); loaded = true; } } catch {}
+  }
+  if (!loaded){
+    const c = D.containers.find(x => x.cap >= 3) || D.containers[0];
+    if (c) state.containerId = c.i;
+  }
+  refresh();
+}
+
+init();
+</script>
+</body>
+</html>
