@@ -8,7 +8,7 @@
 :root{
   --bg:#0b0d0c; --panel:#131715; --panel2:#1a201d; --line:#2a322d;
   --fg:#e6ebe7; --muted:#8b978f; --acc:#7fd67f; --acc2:#4ea64e;
-  --pos:#53c353; --neg:#c15252; --warn:#e0a34a;
+  --pos:#53c353; --neg:#c15252; --warn:#e0a34a; --gold:#c5a114;
   --r-ordinary:#eeeeee; --r-unordinary:#53c353; --r-special:#4a9ee0;
   --r-rare:#b06fe0; --r-exclusive:#e05c5c; --r-legendary:#e0c04a; --r-unique:#e08a3c;
 }
@@ -99,6 +99,13 @@ th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6p
 .bar{height:6px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:8px 0}
 .bar>i{display:block;height:100%;background:var(--acc2);width:0;transition:width .12s}
 .note{font-size:12px;color:var(--muted)}
+
+/* precios de mercado */
+#market-tag{font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:3px 10px;cursor:default}
+.price{font-variant-numeric:tabular-nums;color:var(--gold)}
+.price.est{color:var(--muted)}
+.price.est::after{content:'~';font-size:.85em;vertical-align:super;margin-left:1px}
+.kpi .v.cost{color:var(--gold)}
 .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
 textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;resize:vertical}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -108,6 +115,7 @@ textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;fon
 <body>
 <header>
   <h1>STAL<span>ZONE</span> · Calculadora de builds</h1>
+  <span id="market-tag" class="hidden" title=""></span>
   <div class="tabs">
     <button id="tab-calc" class="on" data-tab="calc">Calculadora</button>
     <button id="tab-opt" data-tab="opt">Optimizador</button>
@@ -188,6 +196,15 @@ textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;fon
             <label style="cursor:pointer"><input type="checkbox" id="o-limits" checked> Respetar límites de acumulación</label>
           </div>
           <div id="o-limit-rows" style="margin-top:8px"></div>
+          <div id="o-budget-wrap" class="hidden">
+            <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
+            <label>Presupuesto para los artefactos (₽) — 0 = sin límite</label>
+            <input type="number" id="o-budget" min="0" step="100000" value="0">
+            <div style="margin-top:8px">
+              <label style="cursor:pointer"><input type="checkbox" id="o-percost"> Maximizar el objetivo <b>por rublo</b> en vez de en total</label>
+            </div>
+            <p class="note" id="o-budget-note" style="margin:6px 0 0"></p>
+          </div>
           <div class="split" style="margin-top:10px">
             <div><label>Candidatos máx.</label><input type="number" id="o-cand" min="6" max="106" value="34"></div>
             <div><label>Tiempo máx. (s)</label><input type="number" id="o-time" min="1" max="120" value="12"></div>
@@ -247,6 +264,8 @@ textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;fon
 <div id="modal-host"></div>
 
 <script src="data/gamedata.js"></script>
+<!-- Opcional: precios de subasta (tools/gen_prices.py). Sin él la calculadora funciona igual. -->
+<script src="data/prices.js" onerror="void 0"></script>
 <script>
 /* =========================================================================
    MOTOR DE CÁLCULO
@@ -486,6 +505,74 @@ const RARITY_COLOR = q => q >= 175.01 ? 'var(--r-unique)' : q >= 160.01 ? 'var(-
   : q >= 145.01 ? 'var(--r-exclusive)' : q >= 130.01 ? 'var(--r-rare)'
   : q >= 115.01 ? 'var(--r-special)' : q >= 100 ? 'var(--r-unordinary)' : 'var(--r-ordinary)';
 
+/* =========================================================================
+   PRECIOS DE MERCADO
+   Instantánea del historial de subasta generada con tools/gen_prices.py.
+   Es opcional: si data/prices.js no está, toda la interfaz de coste desaparece.
+   ========================================================================= */
+const PRICES = (() => {
+  const P = window.SZ_PRICES || null;
+  const QIDX = {'rarity.ordinary':0, 'rarity.unordinary':1, 'rarity.special':2, 'rarity.rare':3,
+                'rarity.exclusive':4, 'rarity.legendary':5, 'rarity.unique':6};
+  const has = () => !!(P && P.items && Object.keys(P.items).length);
+  const qclass = q => QIDX[ENGINE.rarityOf(q)] || 0;
+
+  /**
+   * Precio estimado de un objeto en una combinación concreta de calidad y nivel.
+   *
+   * Se parte de las ventas realmente observadas y se corrigen al punto pedido con las
+   * pendientes del ajuste (encarecimiento por nivel y por escalón de rareza), pesando
+   * cada observación por su número de ventas y por lo cerca que está del punto. Así el
+   * dato manda donde lo hay y el modelo sólo rellena los huecos.
+   *
+   * @returns {{value:number, exact:boolean, n:number}|null}
+   */
+  function estimate(id, level, quality){
+    if (!P || !P.items[id]) return null;
+    const m = P.items[id], qc = qclass(quality);
+    let num = 0, den = 0, exact = null;
+    for (const k in m.o){
+      const c = k.indexOf(',');
+      const q = +k.slice(0, c), lv = +k.slice(c + 1);
+      const p = m.o[k][0], n = m.o[k][1];
+      if (q === qc && lv === level) exact = {value: p, n};
+      const w = n / ((1 + Math.abs(level - lv)) * (1 + 3 * Math.abs(qc - q)));
+      num += w * (Math.log(p) + m.b * (level - lv) + m.c * (qc - q));
+      den += w;
+    }
+    if (exact && exact.n >= 3) return {value: exact.value, exact: true, n: exact.n};
+    if (!den) return null;
+    return {value: Math.exp(num / den), exact: false, n: m.n};
+  }
+
+  /** Coste de una build completa. `missing` = objetos equipados sin datos de precio. */
+  function ofBuild(b){
+    let total = 0, missing = 0, estimated = 0;
+    const add = (id, level, quality) => {
+      const e = estimate(id, level, quality);
+      if (!e){ missing++; return; }
+      total += e.value;
+      if (!e.exact) estimated++;
+    };
+    if (b.container) add(b.container.i, 0, 0);
+    if (b.armor && b.armor.item) add(b.armor.item.i, b.armor.level, 0);
+    for (const a of b.artefacts) if (a && a.item) add(a.item.i, a.level, a.quality);
+    return {total, missing, estimated};
+  }
+
+  /** 1 850 000 → «1,85 M ₽» — los precios de subasta son demasiado largos en crudo. */
+  function fmt(v){
+    if (v === null || v === undefined) return '—';
+    if (v >= 1e6) return (v / 1e6).toLocaleString('es', {maximumFractionDigits: 2}) + ' M ₽';
+    if (v >= 1e3) return Math.round(v / 1e3).toLocaleString('es') + ' k ₽';
+    return Math.round(v).toLocaleString('es') + ' ₽';
+  }
+  const fmtFull = v => Math.round(v).toLocaleString('es') + ' ₽';
+
+  return {has, estimate, ofBuild, fmt, fmtFull, qclass,
+          region: P ? P.region : null, generated: P ? P.generated : null, demo: P ? P.demo : false};
+})();
+
 const state = {
   containerId: null, armorId: null, armorLevel: 15,
   artefacts: [],          // [{id, level, quality, addSel:[índices]}]
@@ -615,21 +702,34 @@ function renderArtefacts(){
       const nm = el('span', {className:'nm', textContent: it.n.es, title:'Cambiar artefacto'});
       nm.onclick = () => pickArtefact(i);
       const qt = el('span', {className:'qt', textContent:`+${cfg.level} · ${cfg.quality}%`, style:`color:${RARITY_COLOR(cfg.quality)}`});
+      const pr = el('span', {className:'qt price'});
+      const showPrice = () => {
+        if (!PRICES.has()) return;
+        const e = PRICES.estimate(cfg.id, cfg.level, cfg.quality);
+        pr.className = 'qt price' + (e && !e.exact ? ' est' : '');
+        pr.textContent = e ? PRICES.fmt(e.value) : '—';
+        pr.title = !e ? 'Sin ventas registradas de este artefacto'
+          : e.exact ? `Mediana de ${e.n} ventas con esta calidad y nivel`
+                    : 'Estimado a partir de ventas de calidades y niveles próximos';
+      };
+      showPrice();
       const x = el('button', {className:'x', textContent:'✕', title:'Vaciar hueco'});
       x.onclick = () => { state.artefacts[i] = null; refresh(); };
-      head.append(img, nm, qt, x);
+      head.append(img, nm, pr, qt, x);
 
       const body = el('div', {className:'body'});
       body.append(sliderRow('Nivel', cfg.level, 0, 15, 1, (v, commit) => {
         const prev = ENGINE.addSlots(cfg.id, cfg.level);
         cfg.level = v; syncAddSel(cfg, prev);
         qt.textContent = `+${cfg.level} · ${cfg.quality}%`;
+        showPrice();
         commit ? refresh() : recalc();
       }, [0,5,10,15]));
       body.append(sliderRow('Calidad %', cfg.quality, 0, 190, 1, (v, commit) => {
         cfg.quality = v;
         qt.textContent = `+${cfg.level} · ${cfg.quality}%`;
         qt.style.color = RARITY_COLOR(v);
+        showPrice();
         commit ? refresh() : recalc();
       }, [0,100,115,130,145,160,175]));
 
@@ -699,9 +799,15 @@ function sliderRow(label, value, min, max, step, apply, presets){
 }
 
 function pickArtefact(i){
+  const prev0 = state.artefacts[i];
+  const lvl = prev0 ? prev0.level : 15, qual = prev0 ? prev0.quality : 100;
   openPicker({
     title:'Elegir artefacto', items: D.artefacts,
-    meta: it => `<span style="color:var(--muted)">${it.s.length} stats</span>`,
+    meta: it => {
+      const e = PRICES.has() ? PRICES.estimate(it.i, lvl, qual) : null;
+      const price = e ? `<span class="price${e.exact ? '' : ' est'}">${PRICES.fmt(e.value)}</span><br>` : '';
+      return `${price}<span style="color:var(--muted)">${it.s.length} stats</span>`;
+    },
     onPick: it => {
       const prev = state.artefacts[i];
       const cfg = {id: it.i, level: prev ? prev.level : 15, quality: prev ? prev.quality : 100, addSel: []};
@@ -746,6 +852,20 @@ function renderResults(r){
   kpis.append(
     el('div', {className:'kpi'}, el('div', {className:'v', textContent:r.effectiveHealth.toFixed(2)}), el('div', {className:'l', textContent:'Salud efectiva'})),
     el('div', {className:'kpi'}, el('div', {className:'v', textContent:r.healingPerSecond.toFixed(2) + '%'}), el('div', {className:'l', textContent:'Curación por segundo'})));
+  if (PRICES.has()){
+    const c = PRICES.ofBuild(buildObject());
+    const kpi = el('div', {className:'kpi', style:'grid-column:1/-1'},
+      el('div', {className:'v cost', textContent: c.total > 0 ? PRICES.fmtFull(c.total) : '—',
+        title:'Suma de mochila, armadura y artefactos'}),
+      el('div', {className:'l', textContent:`Coste en el mercado · ${PRICES.region}`}));
+    if (c.missing || c.estimated){
+      const bits = [];
+      if (c.estimated) bits.push(`${c.estimated} estimado${c.estimated > 1 ? 's' : ''}`);
+      if (c.missing) bits.push(`${c.missing} sin datos, no sumado${c.missing > 1 ? 's' : ''}`);
+      kpi.append(el('div', {className:'note', style:'margin-top:2px', textContent: bits.join(' · ')}));
+    }
+    kpis.append(kpi);
+  }
   host.append(kpis);
 
   for (const key of r.alerts){
@@ -894,6 +1014,9 @@ const OPTIMIZER = (() => {
 
   /**
    * @param p.items      artefactos disponibles (objetos de gamedata)
+   * @param p.costs      coste de cada artefacto (mismo orden que items); null = sin datos
+   * @param p.budget     presupuesto máximo para el conjunto de artefactos (0 = sin límite)
+   * @param p.perCost    maximizar la ganancia por rublo en lugar de la ganancia absoluta
    * @param p.onProgress callback(nodes, elapsed) — puede devolver una promesa para ceder el hilo
    * @param p.isAborted  función que corta la búsqueda
    */
@@ -903,6 +1026,12 @@ const OPTIMIZER = (() => {
     const spec = goalSpec(p.goalId, p.reactions);
     const limits = p.limits || {};
     const limEntries = Object.keys(limits).filter(k => IDX[k] !== undefined).map(k => [IDX[k], limits[k]]);
+    const budget = p.budget > 0 ? p.budget : 0;
+    const perCost = !!p.perCost;
+    const costs = p.costs || null;
+    // Sin precio no se puede ni respetar un presupuesto ni medir el rendimiento por rublo:
+    // esos artefactos quedan fuera de la búsqueda (se informa de cuántos son).
+    const needCost = budget > 0 || perCost;
 
     const empty = vec();
     const baseGoal = spec.f(evaluate(empty, C));
@@ -910,18 +1039,20 @@ const OPTIMIZER = (() => {
     // Aporte individual de cada artefacto, usado para ordenar y para elegir candidatos.
     const scored = p.items.map((it, i) => {
       const v = artefactVector(it, p.level, p.quality, C.eff);
-      return {i, v, gain: spec.f(evaluate(v, C)) - baseGoal};
+      return {i, v, cost: costs ? costs[i] : null, gain: spec.f(evaluate(v, C)) - baseGoal};
     });
+    const priced = needCost ? scored.filter(s => s.cost > 0) : scored;
+    const skipped = scored.length - priced.length;
 
     // Candidatos = los que más aportan al objetivo + los mejores "purificadores" de cada límite.
-    const pool = new Set(scored.slice().sort((a, b) => b.gain - a.gain)
+    const pool = new Set(priced.slice().sort((a, b) => b.gain - a.gain)
       .filter(s => s.gain > 1e-12).slice(0, p.maxCand).map(s => s.i));
     for (const [li] of limEntries){
-      scored.slice().sort((a, b) => a.v[li] - b.v[li]).slice(0, 6)
+      priced.slice().sort((a, b) => a.v[li] - b.v[li]).slice(0, 6)
         .filter(s => s.v[li] < 0).forEach(s => pool.add(s.i));
     }
-    const cands = scored.filter(s => pool.has(s.i)).sort((a, b) => b.gain - a.gain);
-    if (!cands.length) return {best: null, nodes: 0, exhaustive: true, candidates: 0};
+    const cands = priced.filter(s => pool.has(s.i)).sort((a, b) => b.gain - a.gain);
+    if (!cands.length) return {best: null, nodes: 0, exhaustive: true, candidates: 0, skipped};
 
     const M = cands.length;
     // Sufijos: mejor aporte disponible a partir de cada índice (0 = dejar el hueco vacío).
@@ -939,23 +1070,33 @@ const OPTIMIZER = (() => {
 
     const raw = vec(), probe = vec(), scratch = vec();
     const choice = new Int32Array(cap), cursor = new Int32Array(cap + 1);
-    let best = null, nodes = 0, exhaustive = true;
+    let best = null, nodes = 0, exhaustive = true, cost = 0;
     const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
 
+    // Valor que se maximiza: la ganancia sobre la build vacía, por rublo si se pide.
+    const score = (f) => perCost ? (f - baseGoal) / cost : f;
+
     const record = (depth) => {
+      if (perCost && cost <= 0) return;              // la build vacía no tiene rendimiento
       const t = evaluate(raw, C, scratch);
       for (const [li, lim] of limEntries) if (t[li] > lim + 1e-9) return;
-      const v = spec.f(t);
-      if (!best || v > best.value) best = {value: v, picks: Array.from(choice.subarray(0, depth))};
+      const v = score(spec.f(t));
+      if (!best || v > best.value)
+        best = {value: v, cost, picks: Array.from(choice.subarray(0, depth))};
     };
 
-    /** ¿Merece la pena seguir explorando este nivel? */
+    /**
+     * ¿Merece la pena seguir explorando este nivel?
+     *
+     * Con objetivo por rublo la cota se divide por el coste ya comprometido: cualquier
+     * extensión de esta rama cuesta al menos eso, así que el cociente no puede subir más.
+     */
     const prune = (depth) => {
       const start = cursor[depth], slotsLeft = cap - depth;
-      if (best){
+      if (best && (!perCost || cost > 0)){
         for (let i = 0; i < N; i++) probe[i] = raw[i];
         for (let c = 0; c < compIdx.length; c++) probe[compIdx[c][0]] += sufComp[c][start] * slotsLeft;
-        if (spec.f(evaluate(probe, C, scratch)) <= best.value + 1e-9) return true;
+        if (score(spec.f(evaluate(probe, C, scratch))) <= best.value + 1e-9) return true;
       }
       for (let c = 0; c < limEntries.length; c++){
         for (let i = 0; i < N; i++) probe[i] = raw[i];
@@ -979,15 +1120,19 @@ const OPTIMIZER = (() => {
       if (depth >= cap || cursor[depth] >= M || prune(depth)){
         depth--;
         if (depth >= 0){
-          const v = cands[choice[depth]].v;
-          for (let i = 0; i < N; i++) raw[i] -= v[i];
+          const c = cands[choice[depth]];
+          for (let i = 0; i < N; i++) raw[i] -= c.v[i];
+          if (needCost) cost -= c.cost;
         }
         continue;
       }
       const j = cursor[depth]++;
+      // Lo que no cabe en el presupuesto se descarta sin explorar: añadir sólo encarece.
+      if (budget && cost + cands[j].cost > budget + 1e-9) continue;
       choice[depth] = j;
       const v = cands[j].v;
       for (let i = 0; i < N; i++) raw[i] += v[i];
+      if (needCost) cost += cands[j].cost;
       nodes++;
       record(depth + 1);
       cursor[depth + 1] = p.allowDup ? j : j + 1;
@@ -996,8 +1141,8 @@ const OPTIMIZER = (() => {
 
     const elapsed = (typeof performance !== 'undefined' ? performance : Date).now() - t0;
     return {
-      best: best ? {value: best.value, set: best.picks.map(k => cands[k].i)} : null,
-      nodes, exhaustive, candidates: M, elapsed,
+      best: best ? {value: best.value, cost: best.cost, set: best.picks.map(k => cands[k].i)} : null,
+      nodes, exhaustive, candidates: M, elapsed, skipped,
     };
   }
 
@@ -1028,6 +1173,12 @@ async function runOptimizer(){
     if (inp && inp.value !== '') limits[k] = +inp.value;
   }
 
+  const budget = PRICES.has() ? Math.max(0, +$('#o-budget').value || 0) : 0;
+  const perCost = PRICES.has() && $('#o-percost').checked;
+  const costs = PRICES.has()
+    ? D.artefacts.map(it => { const e = PRICES.estimate(it.i, level, quality); return e ? e.value : null; })
+    : null;
+
   optAbort = false;
   $('#o-stop').disabled = false; $('#o-run').disabled = true;
   setOptStatus('Buscando…');
@@ -1035,7 +1186,7 @@ async function runOptimizer(){
   const r = await OPTIMIZER.search({
     items: D.artefacts, container: cont,
     armor: state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null,
-    level, quality, goalId: goal.id, limits,
+    level, quality, goalId: goal.id, limits, costs, budget, perCost,
     allowDup: $('#o-dup').checked,
     maxCand: Math.max(6, Math.min(106, +$('#o-cand').value || 34)),
     timeLimit,
@@ -1051,7 +1202,8 @@ async function runOptimizer(){
   $('#o-stop').disabled = true; $('#o-run').disabled = false;
   $('#o-bar').style.width = '100%';
   setOptStatus(`${r.exhaustive ? 'Búsqueda completa: óptimo garantizado' : 'Detenida por límite de tiempo: mejor encontrada'}`
-    + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`);
+    + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`
+    + (r.skipped ? ` · ${r.skipped} artefactos sin precio excluidos` : ''));
 
   if (r.best){
     // Se recalcula con el motor completo para mostrar todas las estadísticas.
@@ -1065,7 +1217,7 @@ async function runOptimizer(){
       bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
     });
   }
-  renderOptResult(r.best || {set: null}, goal, {level, quality});
+  renderOptResult(r.best || {set: null}, goal, {level, quality, perCost, budget});
 }
 
 function renderOptResult(best, goal, cfg){
@@ -1074,22 +1226,54 @@ function renderOptResult(best, goal, cfg){
   host.replaceChildren();
   if (!best.set){
     host.className = 'empty';
-    host.textContent = 'No se encontró ninguna build que cumpla los límites.';
+    host.textContent = cfg.budget
+      ? 'Ningún conjunto de artefactos cabe en el presupuesto respetando los límites.'
+      : 'No se encontró ninguna build que cumpla los límites.';
     return;
   }
   const pad = el('div', {className:'pad'});
+  // En modo por rublo el valor buscado es un cociente, así que la cifra grande vuelve a
+  // ser el objetivo en bruto (que sale del recálculo completo) y el ratio va debajo.
+  const raw = cfg.perCost
+    ? (goal.id === '__eh' ? best.res.effectiveHealth
+      : goal.id === '__hps' ? best.res.healingPerSecond
+      : (best.res.stats.find(s => s.key === goal.id) || {value: 0}).value)
+    : (goal.min ? -best.value : best.value);
   pad.append(el('div', {className:'kpi', style:'margin-bottom:12px'},
-    el('div', {className:'v', textContent: (goal.min ? -best.value : best.value).toFixed(2)}),
+    el('div', {className:'v', textContent: raw.toFixed(2)}),
     el('div', {className:'l', textContent: goal.label})));
+
+  if (PRICES.has()){
+    let total = 0, missing = 0;
+    for (const i of best.set){
+      const e = PRICES.estimate(D.artefacts[i].i, cfg.level, cfg.quality);
+      e ? total += e.value : missing++;
+    }
+    const kpi = el('div', {className:'kpi', style:'margin-bottom:12px'},
+      el('div', {className:'v cost', textContent: PRICES.fmtFull(total)}),
+      el('div', {className:'l', textContent:'Coste de los artefactos'}));
+    if (cfg.perCost)
+      kpi.append(el('div', {className:'note', style:'margin-top:2px',
+        textContent: `${(best.value * 1e6).toFixed(2)} de ${goal.label.toLowerCase()} por millón de rublos`}));
+    if (missing)
+      kpi.append(el('div', {className:'note', style:'margin-top:2px',
+        textContent: `${missing} sin datos de precio, no sumado${missing > 1 ? 's' : ''}`}));
+    pad.append(kpi);
+  }
 
   const counts = new Map();
   for (const i of best.set) counts.set(i, (counts.get(i) || 0) + 1);
   for (const [i, n] of counts){
     const it = D.artefacts[i];
     const img = el('img', {src: ICON(it), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
-    pad.append(el('div', {className:'slot', style:'margin-bottom:6px'}, img,
-      el('span', {className:'nm', textContent: (n > 1 ? `${n}× ` : '') + it.n.es}),
-      el('span', {className:'qt', textContent:`+${cfg.level} · ${cfg.quality}%`, style:`color:${RARITY_COLOR(cfg.quality)}`})));
+    const e = PRICES.has() ? PRICES.estimate(it.i, cfg.level, cfg.quality) : null;
+    const row = el('div', {className:'slot', style:'margin-bottom:6px'}, img,
+      el('span', {className:'nm', textContent: (n > 1 ? `${n}× ` : '') + it.n.es}));
+    if (e) row.append(el('span', {className:'qt price' + (e.exact ? '' : ' est'),
+      textContent: PRICES.fmt(e.value * n)}));
+    row.append(el('span', {className:'qt', textContent:`+${cfg.level} · ${cfg.quality}%`,
+      style:`color:${RARITY_COLOR(cfg.quality)}`}));
+    pad.append(row);
   }
   const apply = el('button', {className:'primary', textContent:'Aplicar esta build', style:'margin-top:10px'});
   apply.onclick = () => {
@@ -1175,8 +1359,9 @@ function renderCompare(){
     const bak = snapshot();
     restore(b.data);
     const r = ENGINE.compute(buildObject());
+    const cost = PRICES.has() ? PRICES.ofBuild(buildObject()) : null;
     restore(bak);
-    return {name: b.name, r};
+    return {name: b.name, r, cost};
   });
 
   const keys = [];
@@ -1197,6 +1382,11 @@ function renderCompare(){
   };
   addRow('Salud efectiva', results.map(x => x.r.effectiveHealth), v => v.toFixed(2));
   addRow('Curación / s', results.map(x => x.r.healingPerSecond), v => v.toFixed(2) + '%');
+  if (PRICES.has()){
+    // En el coste lo deseable es lo bajo, así que se resalta el mínimo (la fila normal
+    // resalta el máximo) usando el signo cambiado.
+    addRow('Coste (' + PRICES.region + ')', results.map(x => -x.cost.total), v => PRICES.fmt(-v));
+  }
 
   for (const k of keys){
     const cells = results.map(x => (x.r.stats.concat(x.r.poly)).find(s => s.key === k));
@@ -1228,13 +1418,19 @@ function switchTab(t){
 function init(){
   for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => switchTab(b.dataset.tab);
 
+  const priceTag = (id, level, quality) => {
+    const e = PRICES.has() ? PRICES.estimate(id, level, quality) : null;
+    return e ? `<span class="price${e.exact ? '' : ' est'}">${PRICES.fmt(e.value)}</span><br>` : '';
+  };
   $('#pick-container').onclick = () => openPicker({
     title:'Elegir mochila / contenedor', items: D.containers,
-    meta: it => `${it.cap} huecos<br><span style="color:var(--muted)">ef ${it.eff.toFixed(0)}% · pr ${it.pro.toFixed(0)}%</span>`,
+    meta: it => `${priceTag(it.i, 0, 0)}${it.cap} huecos<br><span style="color:var(--muted)">ef ${it.eff.toFixed(0)}% · pr ${it.pro.toFixed(0)}%</span>`,
     onPick: it => { state.containerId = it.i; refresh(); }
   });
   $('#pick-armor').onclick = () => openPicker({
-    title:'Elegir armadura', items: D.armors, onPick: it => { state.armorId = it.i; refresh(); }
+    title:'Elegir armadura', items: D.armors,
+    meta: it => priceTag(it.i, state.armorLevel, 0),
+    onPick: it => { state.armorId = it.i; refresh(); }
   });
   $('#armor-lvl').oninput = e => {
     state.armorLevel = +e.target.value;
@@ -1267,6 +1463,28 @@ function init(){
   $('#o-limits').onchange = e => lr.classList.toggle('hidden', !e.target.checked);
   $('#o-run').onclick = () => runOptimizer();
   $('#o-stop').onclick = () => { optAbort = true; };
+
+  // Precios de mercado (sólo si existe data/prices.js)
+  if (PRICES.has()){
+    const tag = $('#market-tag');
+    tag.classList.remove('hidden');
+    tag.textContent = `Mercado ${PRICES.region}${PRICES.demo ? ' · DEMO' : ''} · ${PRICES.generated.slice(0, 10)}`;
+    tag.title = PRICES.demo
+      ? 'Instantánea generada contra la API de demostración: los precios son ficticios.'
+      : `Instantánea del historial de subasta. Regenérala con tools/gen_prices.py --region ${PRICES.region.toLowerCase()}`;
+    $('#o-budget-wrap').classList.remove('hidden');
+    const note = $('#o-budget-note');
+    const syncNote = () => {
+      note.textContent = $('#o-percost').checked
+        ? 'Busca la mejor relación entre el objetivo y el precio. Los artefactos sin ventas registradas quedan fuera.'
+        : (+$('#o-budget').value > 0
+          ? 'Sólo se consideran conjuntos que caben en el presupuesto. No incluye mochila ni armadura.'
+          : 'Sin límite: la búsqueda ignora el precio y sólo informa del coste resultante.');
+    };
+    $('#o-percost').onchange = syncNote;
+    $('#o-budget').oninput = syncNote;
+    syncNote();
+  }
 
   // Guardado
   $('#s-save').onclick = () => {

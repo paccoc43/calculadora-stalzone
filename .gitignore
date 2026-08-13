@@ -1,0 +1,7 @@
+# Credenciales de la API de STALZONE. Nunca deben llegar al repositorio.
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc

@@ -3,14 +3,18 @@
 Calculadora de builds para STALZONE: combina mochila, armadura y artefactos, y muestra las
 estadísticas finales del personaje. Incluye un **optimizador** que busca la mejor combinación de
 artefactos para un objetivo concreto, un **comparador** de builds y **guardado/compartido**.
+Si se generan los precios de subasta, muestra además **cuánto cuesta la build** y permite
+optimizar con presupuesto.
 
 No necesita instalación: abre `index.html` en el navegador.
 
 ```
 index.html          Interfaz, motor de cálculo y optimizador (todo en uno)
 data/gamedata.js    Catálogo: 106 artefactos, 56 contenedores, 137 armaduras
+data/prices.js      Precios de subasta (opcional, se genera aparte)
 tools/gen_data.py   Regenera el catálogo desde la API de stalzone.wiki
-tools/test_*.js     Pruebas del motor y del optimizador (Node)
+tools/gen_prices.py Regenera los precios desde la API oficial de STALZONE
+tools/test_*.js     Pruebas del motor, del optimizador y de los precios (Node)
 ```
 
 ## Mecánicas implementadas
@@ -89,6 +93,55 @@ el tiempo, el resultado se marca como **óptimo garantizado**.
 Opciones: nivel y calidad de los artefactos, permitir o no repetidos, límites de acumulación
 editables, número de candidatos y tiempo máximo.
 
+Con precios cargados aparecen dos opciones más:
+
+- **Presupuesto**: descarta cualquier conjunto que se pase del tope. El coste es aditivo y añadir
+  artefactos sólo encarece, así que la rama entera se poda en cuanto se excede: sigue siendo un
+  óptimo garantizado.
+- **Por rublo**: maximiza la ganancia sobre la build vacía dividida por lo que cuesta. La cota se
+  divide por el gasto ya comprometido —cualquier extensión de esa rama cuesta al menos eso— así que
+  la poda tampoco puede descartar el óptimo. Explora más nodos que el modo normal porque la cota es
+  más floja.
+
+Los artefactos sin ventas registradas quedan fuera de la búsqueda cuando se usa cualquiera de las
+dos: sin precio no se puede ni respetar un presupuesto ni medir el rendimiento por rublo.
+
+## Precios de mercado
+
+`data/prices.js` es **opcional**. Sin él la calculadora funciona igual, sólo que sin ninguna
+referencia a costes. Con él aparecen el precio de cada artefacto, el coste total de la build, una
+fila de coste en el comparador y las dos opciones del optimizador.
+
+```bash
+cp .env.example .env      # y rellena tus credenciales dentro
+python tools/gen_prices.py                    # usa la región de .env
+python tools/gen_prices.py --region eu        # ru | eu | na | sea
+```
+
+Las credenciales viven en `.env`, que está en `.gitignore` y **no debe subirse al repositorio**;
+`.env.example` documenta el formato. También valen las variables de entorno del mismo nombre.
+Se consiguen registrando una aplicación en el Discord de EXBO con el comando `/newapp`, y requieren
+aprobación manual: <https://eapi.stalzone.net/registration.html>. Con `--demo` el script usa la API
+de demostración, que no pide registro pero devuelve precios ficticios.
+
+**Cómo se estima un precio.** La subasta registra cada venta con la calidad y el nivel de mejora del
+lote, así que el generador agrupa el historial por esas dos variables y guarda la **mediana** de
+cada grupo (no la media: hay traspasos a precio simbólico y reventas infladas). Sobre esos grupos
+ajusta `log(precio) = a + b·nivel + c·rareza`, donde `b` y `c` salen de un modelo de efectos fijos
+sobre todo el catálogo y se mezclan con los del propio objeto según cuántas ventas tenga.
+
+Al consultar un precio manda siempre el dato observado: si hay ventas de esa calidad y ese nivel se
+devuelve su mediana tal cual (se marca como exacta). Si no, se combinan las observaciones vecinas
+corrigiéndolas con `b` y `c`, pesadas por número de ventas y cercanía. Los precios estimados se
+marcan con `~` en la interfaz. En validación cruzada sobre el historial real el error típico de los
+huecos ronda el 20 %, en un mercado donde el mismo artefacto se vende entre 1,3 y 2,5 millones.
+
+**Qué cubren los datos.** Sólo los artefactos se subastan con nivel y calidad detallados: los de EU
+dan más de 1400 combinaciones distintas. Las **armaduras y las mochilas se venden sin nivel de
+mejora**, así que su precio es único y no cambia al mover el deslizador de nivel. Además muchas no
+llegan a subastarse nunca (en EU cotizan 102 de 106 artefactos, pero sólo 27 de 137 armaduras y 20
+de 56 mochilas): las que no tienen ventas se muestran sin precio y no suman al total de la build.
+
 ## Verificación
 
 El motor replica la calculadora oficial de [stalzone.wiki](https://stalzone.wiki/en/builds-calculator).
@@ -97,6 +150,7 @@ Desde la raíz del repositorio:
 ```bash
 node tools/test_reference.js   # build de referencia: 26/26 estadísticas exactas
 node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuerza bruta
+node tools/test_prices.js      # estimador de precios + presupuesto y «por rublo» vs fuerza bruta
 ```
 
 - `test_reference.js` reproduce una build conocida (Wicked Hedgehog +15 175 %, Transformer +15 175 %,
@@ -105,6 +159,10 @@ node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuer
 - `test_engine.js` comprueba que la evaluación vectorizada del optimizador coincide con el motor en
   4000 builds aleatorias, y que el branch & bound encuentra el mismo óptimo que una fuerza bruta
   exhaustiva en 24 configuraciones distintas.
+- `test_prices.js` usa una instantánea de precios sintética (no necesita `data/prices.js`) para
+  comprobar el estimador —dato exacto, interpolación, extrapolación, monotonía, ausencia de datos—
+  y que el branch & bound con presupuesto y con objetivo por rublo sigue coincidiendo con la fuerza
+  bruta en 30 configuraciones, sin pasarse nunca del presupuesto.
 
 ## Actualizar el catálogo
 
@@ -112,7 +170,8 @@ node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuer
 python tools/gen_data.py
 ```
 
-Descarga el catálogo desde la API pública de la wiki y reescribe `data/gamedata.js`.
+Descarga el catálogo desde la API pública de la wiki y reescribe `data/gamedata.js`. Los precios van
+por su cuenta: `python tools/gen_prices.py` (ver arriba).
 
 ## Notas
 
