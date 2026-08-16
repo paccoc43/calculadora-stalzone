@@ -182,9 +182,16 @@ textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;fon
       <div class="panel">
         <h2>Parámetros de búsqueda</h2>
         <div class="pad">
-          <p class="note" style="margin-top:0">Usa la mochila y la armadura seleccionadas en la pestaña <b>Calculadora</b>. Busca la combinación de artefactos que maximiza el objetivo sin superar los límites de acumulación.</p>
-          <label>Objetivo a maximizar</label>
-          <select id="o-goal"></select>
+          <p class="note" style="margin-top:0">Busca la combinación de artefactos que maximiza el objetivo sin superar los límites de acumulación. La armadura y el estado del personaje son los de la pestaña <b>Calculadora</b>.</p>
+          <label>Mochila / Contenedor</label>
+          <button class="slot" id="o-pick-container"><span class="ph">+</span><span class="nm">Selecciona una mochila…</span></button>
+          <label style="margin-top:10px">Objetivos a maximizar</label>
+          <div class="row">
+            <select id="o-goal"></select>
+            <button id="o-goal-add">Añadir</button>
+          </div>
+          <div id="o-goal-rows" style="margin-top:8px"></div>
+          <p class="note" id="o-goal-note" style="margin:6px 0 0"></p>
           <div class="split" style="margin-top:10px">
             <div><label>Nivel de los artefactos</label><input type="number" id="o-lvl" min="0" max="15" value="15"></div>
             <div><label>Rareza / calidad (%)</label><input type="number" id="o-qual" min="0" max="190" value="175"></div>
@@ -996,8 +1003,15 @@ const OPTIMIZER = (() => {
   /**
    * Componentes de los que depende el objetivo y en qué dirección conviene moverlos.
    * dir = +1 → cuanto mayor, mejor; dir = -1 → cuanto menor, mejor.
+   *
+   * `goal` es un id suelto o una lista [{id, weight, base, scale}] para optimizar varias
+   * estadísticas a la vez: cada una se mide como fracción de lo que se conseguiría
+   * persiguiéndola sola —(f − base) / scale— y se promedian con los pesos dados. Sin esa
+   * normalización un «50/50» compararía magnitudes de escalas distintas.
    */
-  function goalSpec(goalId, reactions){
+  function goalSpec(goal, reactions){
+    if (Array.isArray(goal)) return multiSpec(goal, reactions);
+    const goalId = goal;
     const R = (reactions || []).filter(k => IDX[k] !== undefined);
     if (goalId === '__eh')
       return {comps: [...new Set(['health_bonus', 'bullet_dmg_factor', ...R])].map(k => [k, 1]), f: effectiveHealth};
@@ -1010,6 +1024,33 @@ const OPTIMIZER = (() => {
     if ((goalId === 'health_bonus' || goalId === 'stamina_regeneration_bonus') && R.length)
       comps = comps.concat(R.map(k => [k, 1]));
     return {comps, f: t => min ? -t[IDX[goalId]] : t[IDX[goalId]]};
+  }
+
+  /**
+   * Media ponderada de varios objetivos ya normalizados.
+   *
+   * Los componentes son la unión de los de cada parte: una misma clave siempre tira en la
+   * misma dirección (la marca ENGINE.CAN_BOTH), así que la unión no puede contradecirse y
+   * la cota del branch & bound —que empuja cada componente a su mejor valor posible— sigue
+   * siendo superior: la media de funciones monótonas también es monótona.
+   */
+  function multiSpec(parts, reactions){
+    const specs = parts.map(g => {
+      const s = goalSpec(g.id, reactions);
+      const w = g.weight > 0 ? g.weight : 0;
+      return {f: s.f, comps: s.comps, w, base: g.base || 0, scale: g.scale > 0 ? g.scale : 1};
+    });
+    const wsum = specs.reduce((a, s) => a + s.w, 0) || 1;
+    const comps = new Map();
+    for (const s of specs) if (s.w > 0) for (const [k, d] of s.comps) comps.set(k, d);
+    return {
+      comps: [...comps].map(([k, d]) => [k, d]),
+      f: t => {
+        let v = 0;
+        for (const s of specs) if (s.w > 0) v += s.w * (s.f(t) - s.base) / s.scale;
+        return v / wsum;
+      },
+    };
   }
 
   /**
@@ -1158,10 +1199,24 @@ const GOALS = [
 let optAbort = false;
 function setOptStatus(t){ $('#o-status').textContent = t; }
 
+// Objetivos elegidos con su reparto (%). La mochila es la del optimizador, que arranca
+// heredando la de la Calculadora pero se puede cambiar sin tocar la build en curso.
+const optState = {containerId: null, goals: [{id: '__eh', weight: 100}]};
+const optContainer = () => optState.containerId ? CNT[optState.containerId] : null;
+
+/** Valor de una estadística concreta en un resultado ya calculado por el motor. */
+function goalValue(goalId, res){
+  if (goalId === '__eh') return res.effectiveHealth;
+  if (goalId === '__hps') return res.healingPerSecond;
+  const s = res.stats.find(x => x.key === goalId);
+  return s ? s.value : 0;
+}
+
 async function runOptimizer(){
-  const goal = GOALS.find(g => g.id === $('#o-goal').value);
-  const cont = state.containerId ? CNT[state.containerId] : null;
-  if (!cont){ setOptStatus('Selecciona primero una mochila en la pestaña Calculadora.'); return; }
+  const cont = optContainer();
+  if (!cont){ setOptStatus('Elige una mochila para la que optimizar.'); return; }
+  const chosen = optState.goals.filter(g => g.weight > 0);
+  if (!chosen.length){ setOptStatus('Añade al menos un objetivo con peso mayor que cero.'); return; }
 
   const level = Math.max(0, Math.min(15, +$('#o-lvl').value || 0));
   const quality = Math.max(0, Math.min(190, +$('#o-qual').value || 0));
@@ -1179,37 +1234,71 @@ async function runOptimizer(){
     ? D.artefacts.map(it => { const e = PRICES.estimate(it.i, level, quality); return e ? e.value : null; })
     : null;
 
-  optAbort = false;
-  $('#o-stop').disabled = false; $('#o-run').disabled = true;
-  setOptStatus('Buscando…');
-
-  const r = await OPTIMIZER.search({
-    items: D.artefacts, container: cont,
-    armor: state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null,
-    level, quality, goalId: goal.id, limits, costs, budget, perCost,
+  const armor = state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null;
+  const common = {
+    items: D.artefacts, container: cont, armor, level, quality, limits, costs, budget,
     allowDup: $('#o-dup').checked,
     maxCand: Math.max(6, Math.min(106, +$('#o-cand').value || 34)),
     timeLimit,
     bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
     isAborted: () => optAbort,
-    onProgress: async (nodes, elapsed) => {
-      setOptStatus(`Explorando… ${nodes.toLocaleString('es')} combinaciones`);
-      $('#o-bar').style.width = Math.min(99, elapsed / timeLimit * 100) + '%';
-      await new Promise(res => setTimeout(res, 0));
-    },
-  });
+  };
+  const progress = (label) => async (nodes, elapsed) => {
+    setOptStatus(`${label}${nodes.toLocaleString('es')} combinaciones`);
+    $('#o-bar').style.width = Math.min(99, elapsed / timeLimit * 100) + '%';
+    await new Promise(res => setTimeout(res, 0));
+  };
+
+  optAbort = false;
+  $('#o-stop').disabled = false; $('#o-run').disabled = true;
+
+  /*
+   * Con varios objetivos primero se busca cada uno por separado: ese máximo es la escala
+   * con la que se normaliza (0 = build vacía, 1 = lo mejor que da ese objetivo solo), y así
+   * un reparto 50/50 equilibra de verdad en vez de dejar mandar a la estadística con los
+   * números más grandes.
+   */
+  const empty = ENGINE.compute({container: cont, armor, artefacts: [],
+    bleeding: state.bleeding, burning: state.burning, reactions: state.reactions});
+  const parts = [];
+  for (const [n, g] of chosen.entries()){
+    const base = goalValue(g.id, empty);
+    let scale = 1, top = null;
+    if (chosen.length > 1){
+      setOptStatus(`Calibrando objetivo ${n + 1} de ${chosen.length}…`);
+      const solo = await OPTIMIZER.search({...common, goalId: g.id, perCost: false,
+        onProgress: progress(`Calibrando ${n + 1}/${chosen.length}… `)});
+      if (optAbort) break;
+      const min = ENGINE.CAN_BOTH.includes(g.id);
+      top = solo.best ? (min ? -solo.best.value : solo.best.value) : base;
+      scale = Math.abs((min ? -top : top) - (min ? -base : base));
+      if (!(scale > 1e-9)) scale = 1;              // objetivo que no se puede mejorar
+    }
+    parts.push({id: g.id, weight: g.weight, base: min0(g.id, base), scale, top, raw: {base}});
+  }
+
+  const multi = chosen.length > 1;
+  setOptStatus('Buscando…');
+  const r = optAbort ? {best: null, nodes: 0, exhaustive: false, candidates: 0, elapsed: 0, skipped: 0}
+    : await OPTIMIZER.search({...common, perCost,
+        goalId: multi ? parts.map(p => ({id: p.id, weight: p.weight, base: p.base, scale: p.scale}))
+                      : chosen[0].id,
+        onProgress: progress('Explorando… ')});
 
   $('#o-stop').disabled = true; $('#o-run').disabled = false;
   $('#o-bar').style.width = '100%';
-  setOptStatus(`${r.exhaustive ? 'Búsqueda completa: óptimo garantizado' : 'Detenida por límite de tiempo: mejor encontrada'}`
-    + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`
-    + (r.skipped ? ` · ${r.skipped} artefactos sin precio excluidos` : ''));
+  setOptStatus(optAbort && !r.best ? 'Búsqueda cancelada.'
+    : `${r.exhaustive ? 'Búsqueda completa: óptimo garantizado' : 'Detenida por límite de tiempo: mejor encontrada'}`
+      + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`
+      + (r.skipped ? ` · ${r.skipped} artefactos sin precio excluidos` : '')
+      // Repartir entre varios objetivos afloja la cota: casi siempre hace falta más tiempo.
+      + (r.exhaustive ? '' : ` · sube el tiempo máximo${multi ? ' (con varios objetivos hacen falta más segundos)' : ''}`
+          + ' o baja los candidatos para garantizar el óptimo'));
 
   if (r.best){
     // Se recalcula con el motor completo para mostrar todas las estadísticas.
     r.best.res = ENGINE.compute({
-      container: cont,
-      armor: state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null,
+      container: cont, armor,
       artefacts: r.best.set.map(i => {
         const it = D.artefacts[i];
         return {item: it, level, quality, addSel: it.a.map((_, k) => k).slice(0, ENGINE.addSlots(it.i, level))};
@@ -1217,10 +1306,80 @@ async function runOptimizer(){
       bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
     });
   }
-  renderOptResult(r.best || {set: null}, goal, {level, quality, perCost, budget});
+  renderOptResult(r.best || {set: null}, parts, {level, quality, perCost, budget, container: cont});
 }
 
-function renderOptResult(best, goal, cfg){
+/** La base que se resta a un objetivo va en el mismo signo que usa goalSpec (min → −valor). */
+const min0 = (goalId, base) => ENGINE.CAN_BOTH.includes(goalId) ? -base : base;
+
+/** Reparte el 100 % a partes iguales entre los objetivos elegidos. */
+function evenWeights(){
+  const n = optState.goals.length;
+  if (!n) return;
+  const w = Math.round(100 / n);
+  optState.goals.forEach((g, i) => g.weight = i === n - 1 ? 100 - w * (n - 1) : w);
+}
+
+function renderOptContainer(){
+  const btn = $('#o-pick-container');
+  const c = optContainer();
+  btn.replaceChildren();
+  if (c){
+    const img = el('img', {src: ICON(c), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
+    btn.append(img, el('span', {className:'nm', textContent: c.n.es}),
+      el('span', {className:'qt', textContent: `${c.cap} huecos`}));
+  } else {
+    btn.append(el('span', {className:'ph', textContent:'+'}),
+      el('span', {className:'nm', textContent:'Selecciona una mochila…'}));
+  }
+}
+
+function renderOptGoals(){
+  const host = $('#o-goal-rows');
+  host.replaceChildren();
+  const multi = optState.goals.length > 1;
+  for (const g of optState.goals){
+    const label = (GOALS.find(x => x.id === g.id) || {label: g.id}).label;
+    const row = el('div', {className:'ctl', style:'grid-template-columns:1fr 90px 32px;margin-bottom:6px'});
+    row.append(el('label', {textContent: label}));
+    if (multi){
+      const w = el('input', {type:'number', min:'0', max:'100', step:'5', value: g.weight});
+      w.oninput = () => { g.weight = Math.max(0, Math.min(100, +w.value || 0)); syncGoalNote(); };
+      row.append(w);
+    } else {
+      row.append(el('div', {className:'mono', style:'color:var(--muted)', textContent:'100 %'}));
+    }
+    const del = el('button', {className:'danger', textContent:'×', title:'Quitar este objetivo'});
+    del.disabled = optState.goals.length < 2;
+    del.onclick = () => {
+      optState.goals = optState.goals.filter(x => x !== g);
+      evenWeights(); renderOptGoals();
+    };
+    row.append(del);
+    host.append(row);
+  }
+  syncGoalNote();
+}
+
+function syncGoalNote(){
+  const total = optState.goals.reduce((a, g) => a + g.weight, 0);
+  $('#o-goal-note').textContent = optState.goals.length < 2
+    ? 'Añade más estadísticas para repartir la búsqueda entre varias a la vez.'
+    : 'Cada objetivo se mide como porcentaje de lo que lograría persiguiéndolo solo, y se'
+      + ` promedian con estos pesos (se normalizan; ahora suman ${total} %).`;
+}
+
+/** Media ponderada de los objetivos ya normalizados, en tanto por uno. */
+function combinedIndex(parts, res){
+  let v = 0, w = 0;
+  for (const p of parts){
+    v += p.weight * (min0(p.id, goalValue(p.id, res)) - p.base) / p.scale;
+    w += p.weight;
+  }
+  return w ? v / w : 0;
+}
+
+function renderOptResult(best, parts, cfg){
   const host = $('#o-result');
   host.className = '';
   host.replaceChildren();
@@ -1232,16 +1391,39 @@ function renderOptResult(best, goal, cfg){
     return;
   }
   const pad = el('div', {className:'pad'});
-  // En modo por rublo el valor buscado es un cociente, así que la cifra grande vuelve a
-  // ser el objetivo en bruto (que sale del recálculo completo) y el ratio va debajo.
-  const raw = cfg.perCost
-    ? (goal.id === '__eh' ? best.res.effectiveHealth
-      : goal.id === '__hps' ? best.res.healingPerSecond
-      : (best.res.stats.find(s => s.key === goal.id) || {value: 0}).value)
-    : (goal.min ? -best.value : best.value);
-  pad.append(el('div', {className:'kpi', style:'margin-bottom:12px'},
-    el('div', {className:'v', textContent: raw.toFixed(2)}),
-    el('div', {className:'l', textContent: goal.label})));
+  const multi = parts.length > 1;
+  const labelOf = id => (GOALS.find(g => g.id === id) || {label: id}).label;
+  const pesoTotal = parts.reduce((a, p) => a + p.weight, 0) || 1;
+
+  if (multi){
+    // Con varios objetivos la cifra grande es el índice combinado: 100 % sería alcanzar a
+    // la vez el máximo de cada uno por separado, que casi nunca es posible.
+    pad.append(el('div', {className:'kpi', style:'margin-bottom:12px'},
+      el('div', {className:'v', textContent: (combinedIndex(parts, best.res) * 100).toFixed(1) + ' %'}),
+      el('div', {className:'l', textContent:'Objetivo combinado'})));
+    const t = el('table');
+    t.append(el('tr', {}, el('th', {textContent:'Objetivo'}), el('th', {textContent:'Reparto'}),
+      el('th', {textContent:'Valor'}), el('th', {textContent:'De su máximo'})));
+    for (const p of parts){
+      const v = goalValue(p.id, best.res);
+      const pct = p.top === null || !(p.scale > 0) ? null
+        : (min0(p.id, v) - p.base) / p.scale * 100;
+      t.append(el('tr', {},
+        el('td', {textContent: labelOf(p.id)}),
+        el('td', {textContent: Math.round(p.weight / pesoTotal * 100) + ' %'}),
+        el('td', {textContent: v.toFixed(2)}),
+        el('td', {textContent: pct === null ? '—' : `${pct.toFixed(0)} % de ${p.top.toFixed(2)}`})));
+    }
+    pad.append(el('div', {className:'scroll', style:'margin-bottom:12px'}, t));
+  } else {
+    // En modo por rublo el valor buscado es un cociente, así que la cifra grande vuelve a
+    // ser el objetivo en bruto (que sale del recálculo completo) y el ratio va debajo.
+    const goal = GOALS.find(g => g.id === parts[0].id) || {id: parts[0].id, label: parts[0].id};
+    const raw = cfg.perCost ? goalValue(goal.id, best.res) : (goal.min ? -best.value : best.value);
+    pad.append(el('div', {className:'kpi', style:'margin-bottom:12px'},
+      el('div', {className:'v', textContent: raw.toFixed(2)}),
+      el('div', {className:'l', textContent: goal.label})));
+  }
 
   if (PRICES.has()){
     let total = 0, missing = 0;
@@ -1254,7 +1436,9 @@ function renderOptResult(best, goal, cfg){
       el('div', {className:'l', textContent:'Coste de los artefactos'}));
     if (cfg.perCost)
       kpi.append(el('div', {className:'note', style:'margin-top:2px',
-        textContent: `${(best.value * 1e6).toFixed(2)} de ${goal.label.toLowerCase()} por millón de rublos`}));
+        textContent: multi
+          ? `${(best.value * 1e8).toFixed(2)} % del objetivo combinado por millón de rublos`
+          : `${(best.value * 1e6).toFixed(2)} de ${labelOf(parts[0].id).toLowerCase()} por millón de rublos`}));
     if (missing)
       kpi.append(el('div', {className:'note', style:'margin-top:2px',
         textContent: `${missing} sin datos de precio, no sumado${missing > 1 ? 's' : ''}`}));
@@ -1277,6 +1461,8 @@ function renderOptResult(best, goal, cfg){
   }
   const apply = el('button', {className:'primary', textContent:'Aplicar esta build', style:'margin-top:10px'});
   apply.onclick = () => {
+    // La búsqueda puede haberse hecho para otra mochila: se lleva también a la Calculadora.
+    if (cfg.container) state.containerId = cfg.container.i;
     state.artefacts = best.set.map(i => {
       const it = D.artefacts[i];
       return {id: it.i, level: cfg.level, quality: cfg.quality, addSel: it.a.map((_,k)=>k).slice(0, ENGINE.addSlots(it.i, cfg.level))};
@@ -1411,6 +1597,11 @@ function renderCompare(){
 function switchTab(t){
   for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('on', b.dataset.tab === t);
   for (const id of ['calc','opt','cmp','save']) $('#v-' + id).classList.toggle('hidden', id !== t);
+  // El optimizador arranca con la mochila de la Calculadora; luego va por libre.
+  if (t === 'opt'){
+    if (!optState.containerId) optState.containerId = state.containerId;
+    renderOptContainer();
+  }
   if (t === 'cmp') renderCompare();
   if (t === 'save') renderSaved();
 }
@@ -1452,7 +1643,18 @@ function init(){
   // Optimizador
   const gsel = $('#o-goal');
   for (const g of GOALS) gsel.append(el('option', {value: g.id, textContent: g.label}));
-  gsel.value = '__eh';
+  gsel.value = '__hps';
+  $('#o-pick-container').onclick = () => openPicker({
+    title:'Mochila para la búsqueda', items: D.containers,
+    meta: it => `${priceTag(it.i, 0, 0)}${it.cap} huecos<br><span style="color:var(--muted)">ef ${it.eff.toFixed(0)}% · pr ${it.pro.toFixed(0)}%</span>`,
+    onPick: it => { optState.containerId = it.i; renderOptContainer(); }
+  });
+  $('#o-goal-add').onclick = () => {
+    const id = gsel.value;
+    if (optState.goals.some(g => g.id === id)) return;
+    optState.goals.push({id, weight: 0});
+    evenWeights(); renderOptGoals();
+  };
   const lr = $('#o-limit-rows');
   for (const k in ENGINE.LIMITS){
     const row = el('div', {className:'ctl', style:'grid-template-columns:1fr 90px'});
@@ -1463,6 +1665,7 @@ function init(){
   $('#o-limits').onchange = e => lr.classList.toggle('hidden', !e.target.checked);
   $('#o-run').onclick = () => runOptimizer();
   $('#o-stop').onclick = () => { optAbort = true; };
+  renderOptGoals();
 
   // Precios de mercado (sólo si existe data/prices.js)
   if (PRICES.has()){

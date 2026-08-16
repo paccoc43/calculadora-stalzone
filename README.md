@@ -81,8 +81,10 @@ biológica, emisiones psy y temperatura, y **1,0** para la congelación.
 
 ## Optimizador
 
-Elige una estadística a maximizar y busca la combinación de artefactos que la consigue sin superar
-los límites de acumulación. Usa la mochila y la armadura seleccionadas en la pestaña *Calculadora*.
+Elige una o varias estadísticas a maximizar y busca la combinación de artefactos que las consigue
+sin superar los límites de acumulación. La **mochila se elige en el propio optimizador** (arranca
+con la de la pestaña *Calculadora* y a partir de ahí va por libre; al aplicar la build se lleva
+también a la Calculadora). La armadura y el estado del personaje sí son los de la *Calculadora*.
 
 Es un **branch & bound** exacto: representa la build como un vector de contribuciones y acota cada
 rama sustituyendo los componentes del objetivo por el mejor aporte que queda disponible. Como todas
@@ -92,6 +94,28 @@ el tiempo, el resultado se marca como **óptimo garantizado**.
 
 Opciones: nivel y calidad de los artefactos, permitir o no repetidos, límites de acumulación
 editables, número de candidatos y tiempo máximo.
+
+### Varias estadísticas a la vez
+
+Se pueden añadir varios objetivos con un reparto en porcentaje (dos objetivos entran a 50/50).
+Sumar sin más las estadísticas no serviría: la regeneración de aguante llega a 46 y la velocidad
+a 13, así que la de números más grandes se llevaría toda la búsqueda. Por eso cada objetivo se
+**normaliza** antes de mezclarlo:
+
+1. Se busca cada estadística por separado, con las mismas restricciones (mochila, límites,
+   presupuesto, nivel y calidad). Ese máximo es su escala.
+2. Cada una se mide como `(valor − build vacía) / (máximo − build vacía)`: 0 = no aporta nada,
+   1 = tan buena como si sólo se hubiera buscado ella.
+3. El objetivo real es la media ponderada de esas fracciones, y el resultado se presenta como
+   **objetivo combinado** en porcentaje, con el detalle de cuánto alcanza cada estadística.
+
+Un 50/50 de velocidad de movimiento y regeneración de aguante en la Secret Valley 35 (nivel 15,
+calidad 130 %, tope de 10 M ₽) llega al 80 % de cada una a la vez: 10,55 de velocidad de un máximo
+de 13,13 y 37,05 de regeneración de un máximo de 46,12.
+
+La media ponderada de funciones monótonas sigue siendo monótona, así que la cota del branch &
+bound sigue siendo válida y el óptimo sigue estando garantizado. Un reparto 100/0 da exactamente
+el mismo resultado que perseguir esa estadística sola.
 
 Con precios cargados aparecen dos opciones más:
 
@@ -151,6 +175,7 @@ Desde la raíz del repositorio:
 node tools/test_reference.js   # build de referencia: 26/26 estadísticas exactas
 node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuerza bruta
 node tools/test_prices.js      # estimador de precios + presupuesto y «por rublo» vs fuerza bruta
+node tools/test_multigoal.js   # objetivo múltiple: normalización y reparto de pesos vs fuerza bruta
 ```
 
 - `test_reference.js` reproduce una build conocida (Wicked Hedgehog +15 175 %, Transformer +15 175 %,
@@ -163,6 +188,10 @@ node tools/test_prices.js      # estimador de precios + presupuesto y «por rubl
   comprobar el estimador —dato exacto, interpolación, extrapolación, monotonía, ausencia de datos—
   y que el branch & bound con presupuesto y con objetivo por rublo sigue coincidiendo con la fuerza
   bruta en 30 configuraciones, sin pasarse nunca del presupuesto.
+- `test_multigoal.js` comprueba el objetivo múltiple: que la media ponderada normalizada es la que
+  dice ser, que el branch & bound sigue dando el óptimo exacto en 8 objetivos compuestos, que un
+  reparto 100/0 equivale al objetivo suelto y que un 50/50 llega a un compromiso real entre dos
+  estadísticas que compiten.
 
 ## Actualizar el catálogo
 
