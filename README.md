@@ -95,6 +95,38 @@ el tiempo, el resultado se marca como **óptimo garantizado**.
 Opciones: nivel y calidad de los artefactos, permitir o no repetidos, límites de acumulación
 editables, número de candidatos y tiempo máximo.
 
+### Mezclar niveles y rarezas
+
+Por defecto todas las piezas van al mismo nivel y la misma rareza. Con **mezclar rarezas** y
+**mezclar niveles** esos dos campos pasan a ser un *tope*: cada hueco puede llevar cualquier
+versión por debajo. Como el precio de subasta se dispara con la rareza y con el nivel, poder
+bajar de grado donde no compensa deja dinero para subir donde sí, y con presupuesto ajustado la
+diferencia es grande. Velocidad de movimiento en la Secret Valley 35 con los precios de EU:
+
+| Presupuesto | Fijo | Mezclando | |
+|---|---|---|---|
+| 2 M ₽  | 9,85  | **10,43** | +6 % |
+| 4 M ₽  | 10,47 | **11,90** | +14 % |
+| 6 M ₽  | 11,65 | **12,67** | +9 % |
+| 10 M ₽ | 13,13 | **13,52** | +3 % |
+
+Sólo aparece con precios cargados: sin ellos la versión superior gana siempre y no hay nada que
+decidir. Mezclar multiplica las versiones de cada artefacto (16 niveles × 7 rarezas), así que el
+pool de candidatos se construye distinto:
+
+1. **Poda por artefacto**: se descarta toda versión que otra mejore a la vez en precio, en cada
+   componente del objetivo y en cada acumulación limitada. Cambiarla por la que la domina nunca
+   empeora el resultado ni rompe una restricción, así que el óptimo se conserva.
+2. **Tramos de gasto**: el resto del pool se reparte en ocho tramos de precio y en cada uno
+   entran los artefactos que más aportan a ese precio (primero uno de cada artefacto, después se
+   rellena el cupo). Ordenar sólo por aporte llenaría la lista de versiones máximas que no caben
+   ni dos en el presupuesto; ordenar sólo por rublo, de baratijas.
+3. **El grado tope siempre entra**, de modo que el espacio de búsqueda contiene al del modo fijo
+   y activar la mezcla no puede dar un resultado peor con los mismos topes.
+
+«Permitir artefactos repetidos» sigue contando por artefacto: desmarcado, tampoco caben dos
+versiones distintas del mismo.
+
 ### Varias estadísticas a la vez
 
 Se pueden añadir varios objetivos con un reparto en porcentaje (dos objetivos entran a 50/50).
@@ -176,6 +208,7 @@ node tools/test_reference.js   # build de referencia: 26/26 estadísticas exacta
 node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuerza bruta
 node tools/test_prices.js      # estimador de precios + presupuesto y «por rublo» vs fuerza bruta
 node tools/test_multigoal.js   # objetivo múltiple: normalización y reparto de pesos vs fuerza bruta
+node tools/test_mix.js         # mezcla de niveles y rarezas vs fuerza bruta sobre todas las versiones
 ```
 
 - `test_reference.js` reproduce una build conocida (Wicked Hedgehog +15 175 %, Transformer +15 175 %,
@@ -192,6 +225,10 @@ node tools/test_multigoal.js   # objetivo múltiple: normalización y reparto de
   dice ser, que el branch & bound sigue dando el óptimo exacto en 8 objetivos compuestos, que un
   reparto 100/0 equivale al objetivo suelto y que un 50/50 llega a un compromiso real entre dos
   estadísticas que compiten.
+- `test_mix.js` comprueba la mezcla de grados contra una fuerza bruta que recorre *todas* las
+  versiones —no sólo las que el optimizador retiene como candidatas— en 18 búsquedas, que mezclar
+  nunca empeora con el mismo tope, que ninguna pieza se pasa del nivel o la rareza pedidos y que
+  «sin repetidos» tampoco deja colar el mismo artefacto en dos rarezas.
 
 ## Actualizar el catálogo
 

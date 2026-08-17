@@ -196,6 +196,13 @@ textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;fon
             <div><label>Nivel de los artefactos</label><input type="number" id="o-lvl" min="0" max="15" value="15"></div>
             <div><label>Rareza / calidad (%)</label><input type="number" id="o-qual" min="0" max="190" value="175"></div>
           </div>
+          <div id="o-mix-wrap" class="hidden" style="margin-top:8px">
+            <label style="cursor:pointer"><input type="checkbox" id="o-mix-qual"> Mezclar rarezas (usar cualquiera hasta esa)</label>
+            <div style="margin-top:6px">
+              <label style="cursor:pointer"><input type="checkbox" id="o-mix-lvl"> Mezclar niveles (usar cualquiera hasta ese)</label>
+            </div>
+            <p class="note" id="o-mix-note" style="margin:6px 0 0"></p>
+          </div>
           <div style="margin-top:10px">
             <label style="cursor:pointer"><input type="checkbox" id="o-dup" checked> Permitir artefactos repetidos</label>
           </div>
@@ -1053,9 +1060,56 @@ const OPTIMIZER = (() => {
     };
   }
 
+  /*
+   * Tope de calidad de cada escalón de rareza. Dentro de un escalón el precio de subasta es
+   * el mismo (se cotiza por rareza) pero la stat sigue creciendo, así que al mezclar grados
+   * sólo interesa el extremo superior de cada uno.
+   */
+  const QUAL_STEPS = [0, 115, 130, 145, 160, 175, 190];
+  const qrank = q => { const r = ENGINE.RIDX[ENGINE.rarityOf(q)]; return r === undefined ? -1 : r; };
+
+  /** Grados (nivel + calidad) que puede tomar un artefacto: uno solo, o todos por debajo del tope. */
+  function grades(p){
+    const quals = p.mixQuality
+      ? [...QUAL_STEPS.filter(q => qrank(q) < qrank(p.quality)), p.quality]
+      : [p.quality];
+    const levels = [];
+    if (p.mixLevel) for (let l = 0; l <= p.level; l++) levels.push(l);
+    else levels.push(p.level);
+    const out = [];
+    for (const level of levels) for (const quality of quals) out.push({level, quality});
+    return out;
+  }
+
+  /**
+   * Frente de Pareto: se queda con lo que nadie mejora a la vez en precio, en cada componente
+   * del objetivo y en cada acumulación limitada. Al mezclar grados hay decenas de versiones del
+   * mismo artefacto y casi todas son basura —la misma stat por más dinero—, pero descartarlas
+   * por «aporta menos» tiraría justo las baratas que hacen falta para cuadrar el presupuesto.
+   */
+  function undominated(list, comps, accIdx){
+    const out = [];
+    for (const s of list.slice().sort((a, b) => (a.cost || 0) - (b.cost || 0) || b.gain - a.gain)){
+      let dominated = false;
+      for (const k of out){
+        if ((k.cost || 0) > (s.cost || 0) + 1e-9) continue;
+        let better = true;
+        for (const [ci, d] of comps)
+          if (d > 0 ? k.v[ci] < s.v[ci] - 1e-12 : k.v[ci] > s.v[ci] + 1e-12){ better = false; break; }
+        if (better) for (const li of accIdx) if (k.v[li] > s.v[li] + 1e-12){ better = false; break; }
+        if (better){ dominated = true; break; }
+      }
+      if (!dominated) out.push(s);
+    }
+    return out;
+  }
+
   /**
    * @param p.items      artefactos disponibles (objetos de gamedata)
    * @param p.costs      coste de cada artefacto (mismo orden que items); null = sin datos
+   * @param p.priceOf    (id, level, quality) → precio; obligatorio para mezclar grados con precio
+   * @param p.mixLevel   permitir cualquier nivel hasta p.level, no sólo p.level
+   * @param p.mixQuality permitir cualquier rareza hasta p.quality, no sólo p.quality
    * @param p.budget     presupuesto máximo para el conjunto de artefactos (0 = sin límite)
    * @param p.perCost    maximizar la ganancia por rublo en lugar de la ganancia absoluta
    * @param p.onProgress callback(nodes, elapsed) — puede devolver una promesa para ceder el hilo
@@ -1077,27 +1131,78 @@ const OPTIMIZER = (() => {
     const empty = vec();
     const baseGoal = spec.f(evaluate(empty, C));
 
-    // Aporte individual de cada artefacto, usado para ordenar y para elegir candidatos.
-    const scored = p.items.map((it, i) => {
-      const v = artefactVector(it, p.level, p.quality, C.eff);
-      return {i, v, cost: costs ? costs[i] : null, gain: spec.f(evaluate(v, C)) - baseGoal};
-    });
+    // Aporte individual de cada artefacto en cada grado, para ordenar y elegir candidatos.
+    const compIdx = spec.comps.map(([k, d]) => [IDX[k], d]);
+    const accIdx = limEntries.map(([li]) => li);
+    const grid = grades(p);
+    const mixing = grid.length > 1;
+    let scored = [];
+    for (const [i, it] of p.items.entries()){
+      const forItem = grid.map(g => {
+        const v = artefactVector(it, g.level, g.quality, C.eff);
+        return {i, level: g.level, quality: g.quality, v,
+                cost: p.priceOf ? p.priceOf(it.i, g.level, g.quality) : (costs ? costs[i] : null),
+                gain: spec.f(evaluate(v, C)) - baseGoal};
+      });
+      // Se poda artefacto a artefacto antes de juntarlo todo: es lo que mantiene manejable
+      // el catálogo cuando cada uno aporta hasta 96 versiones de sí mismo.
+      scored = scored.concat(mixing
+        ? undominated(needCost ? forItem.filter(s => s.cost > 0) : forItem, compIdx, accIdx)
+        : forItem);
+    }
     const priced = needCost ? scored.filter(s => s.cost > 0) : scored;
-    const skipped = scored.length - priced.length;
+    const skipped = p.items.length - new Set(priced.map(s => s.i)).size;
+    const afford = budget ? priced.filter(s => s.cost <= budget + 1e-9) : priced;
 
     // Candidatos = los que más aportan al objetivo + los mejores "purificadores" de cada límite.
-    const pool = new Set(priced.slice().sort((a, b) => b.gain - a.gain)
-      .filter(s => s.gain > 1e-12).slice(0, p.maxCand).map(s => s.i));
-    for (const [li] of limEntries){
-      priced.slice().sort((a, b) => a.v[li] - b.v[li]).slice(0, 6)
-        .filter(s => s.v[li] < 0).forEach(s => pool.add(s.i));
+    const useful = afford.filter(s => s.gain > 1e-12);
+    const byGain = (a, b) => b.gain - a.gain;
+    const pool = new Set();
+    // El grado tope siempre entra: así el espacio de búsqueda contiene al del modo fijo y
+    // activar la mezcla no puede empeorar el resultado con los mismos topes.
+    (mixing ? useful.filter(s => s.level === p.level && s.quality === p.quality) : useful)
+      .slice().sort(byGain).slice(0, p.maxCand).forEach(s => pool.add(s));
+    /*
+     * Mezclando grados, el pool se reparte por tramos de gasto. Ordenar por aporte llenaría
+     * la lista de versiones máximas que no caben ni dos en el presupuesto, y ordenar por
+     * rublo la llenaría de baratijas: lo que hace falta es saber, para cada nivel de gasto,
+     * qué artefactos son los mejores a ese precio. Una versión por artefacto y tramo.
+     */
+    const techo = budget || useful.reduce((m, s) => Math.max(m, s.cost || 0), 0);
+    if (mixing && techo > 0){
+      const BANDS = 8, porBanda = Math.max(4, Math.ceil(p.maxCand / 3));
+      for (let b = 1; b <= BANDS; b++){
+        const lo = techo * (b - 1) / BANDS, hi = techo * b / BANDS;
+        const enBanda = useful.filter(s => s.cost > lo && s.cost <= hi).sort(byGain);
+        const vistos = new Set();
+        let puestas = 0;
+        // Primero una versión de cada artefacto, para que el tramo no lo copen dos o tres…
+        for (const s of enBanda){
+          if (puestas >= porBanda) break;
+          if (vistos.has(s.i)) continue;
+          vistos.add(s.i); pool.add(s); puestas++;
+        }
+        // …y con el cupo que sobre, las siguientes mejores aunque repitan artefacto.
+        for (const s of enBanda){
+          if (puestas >= porBanda) break;
+          if (pool.has(s)) continue;
+          pool.add(s); puestas++;
+        }
+      }
+    } else if (mixing){
+      useful.slice().sort(byGain).slice(0, p.maxCand).forEach(s => pool.add(s));
     }
-    const cands = priced.filter(s => pool.has(s.i)).sort((a, b) => b.gain - a.gain);
-    if (!cands.length) return {best: null, nodes: 0, exhaustive: true, candidates: 0, skipped};
+    for (const [li] of limEntries){
+      afford.slice().sort((a, b) => a.v[li] - b.v[li]).slice(0, 6)
+        .filter(s => s.v[li] < 0).forEach(s => pool.add(s));
+    }
+    // Quedarse sin candidatos (presupuesto que no da ni para un artefacto) no es «sin solución»:
+    // la build vacía sigue siendo válida y el bucle la registra igual, con M = 0.
+    const cands = (mixing ? undominated([...pool], compIdx, accIdx) : [...pool])
+      .sort((a, b) => b.gain - a.gain);
 
     const M = cands.length;
     // Sufijos: mejor aporte disponible a partir de cada índice (0 = dejar el hueco vacío).
-    const compIdx = spec.comps.map(([k, d]) => [IDX[k], d]);
     const sufComp = compIdx.map(([ci, d]) => {
       const a = new Float64Array(M + 1);
       for (let j = M - 1; j >= 0; j--) a[j] = d > 0 ? Math.max(a[j + 1], cands[j].v[ci]) : Math.min(a[j + 1], cands[j].v[ci]);
@@ -1111,6 +1216,7 @@ const OPTIMIZER = (() => {
 
     const raw = vec(), probe = vec(), scratch = vec();
     const choice = new Int32Array(cap), cursor = new Int32Array(cap + 1);
+    const used = new Int32Array(p.items.length);   // veces que está puesto cada artefacto
     let best = null, nodes = 0, exhaustive = true, cost = 0;
     const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
 
@@ -1150,13 +1256,21 @@ const OPTIMIZER = (() => {
 
     cursor[0] = 0;
     record(0);                                  // la build vacía también es una opción válida
-    let depth = 0;
+    let depth = 0, steps = 0, lastYield = 0;
     while (depth >= 0){
-      if (nodes % 20000 === 0 && nodes > 0){
+      // Se cuentan las vueltas del bucle, no sólo los artefactos colocados: con un presupuesto
+      // muy justo casi todas las ramas se descartan sin llegar a contar como nodo, y el reloj
+      // no llegaría a mirarse nunca.
+      if (++steps % 20000 === 0){
         const elapsed = (typeof performance !== 'undefined' ? performance : Date).now() - t0;
         if (p.isAborted && p.isAborted()){ exhaustive = false; break; }
         if (elapsed > p.timeLimit){ exhaustive = false; break; }
-        if (p.onProgress) await p.onProgress(nodes, elapsed);
+        // Mirar el reloj es gratis; devolver el hilo al navegador no (cada await cuesta unos
+        // milisegundos), así que se hace por tiempo transcurrido y no por vueltas del bucle.
+        if (p.onProgress && elapsed - lastYield > 120){
+          lastYield = elapsed;
+          await p.onProgress(nodes, elapsed);
+        }
       }
       if (depth >= cap || cursor[depth] >= M || prune(depth)){
         depth--;
@@ -1164,16 +1278,20 @@ const OPTIMIZER = (() => {
           const c = cands[choice[depth]];
           for (let i = 0; i < N; i++) raw[i] -= c.v[i];
           if (needCost) cost -= c.cost;
+          used[c.i]--;
         }
         continue;
       }
       const j = cursor[depth]++;
+      // «Sin repetidos» es por artefacto: dos grados del mismo tampoco valen.
+      if (!p.allowDup && used[cands[j].i]) continue;
       // Lo que no cabe en el presupuesto se descarta sin explorar: añadir sólo encarece.
       if (budget && cost + cands[j].cost > budget + 1e-9) continue;
       choice[depth] = j;
       const v = cands[j].v;
       for (let i = 0; i < N; i++) raw[i] += v[i];
       if (needCost) cost += cands[j].cost;
+      used[cands[j].i]++;
       nodes++;
       record(depth + 1);
       cursor[depth + 1] = p.allowDup ? j : j + 1;
@@ -1182,12 +1300,18 @@ const OPTIMIZER = (() => {
 
     const elapsed = (typeof performance !== 'undefined' ? performance : Date).now() - t0;
     return {
-      best: best ? {value: best.value, cost: best.cost, set: best.picks.map(k => cands[k].i)} : null,
-      nodes, exhaustive, candidates: M, elapsed, skipped,
+      best: best ? {
+        value: best.value, cost: best.cost,
+        set: best.picks.map(k => cands[k].i),
+        // Cada pieza con el grado en el que se ha elegido: sin mezclar son todas iguales.
+        picks: best.picks.map(k => ({i: cands[k].i, level: cands[k].level, quality: cands[k].quality,
+                                     cost: cands[k].cost})),
+      } : null,
+      nodes, exhaustive, candidates: M, elapsed, skipped, mixed: mixing,
     };
   }
 
-  return {search, evaluate, context, artefactVector, goalSpec, effectiveHealth, healingPerSecond, KEYS, IDX};
+  return {search, evaluate, context, artefactVector, goalSpec, grades, effectiveHealth, healingPerSecond, KEYS, IDX};
 })();
 
 const GOALS = [
@@ -1234,9 +1358,15 @@ async function runOptimizer(){
     ? D.artefacts.map(it => { const e = PRICES.estimate(it.i, level, quality); return e ? e.value : null; })
     : null;
 
+  // Mezclar grados sólo se sostiene con precios: sin ellos la versión superior gana siempre.
+  const mixLevel = PRICES.has() && $('#o-mix-lvl').checked;
+  const mixQuality = PRICES.has() && $('#o-mix-qual').checked;
+
   const armor = state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null;
   const common = {
     items: D.artefacts, container: cont, armor, level, quality, limits, costs, budget,
+    mixLevel, mixQuality,
+    priceOf: PRICES.has() ? (id, lv, q) => { const e = PRICES.estimate(id, lv, q); return e ? e.value : null; } : null,
     allowDup: $('#o-dup').checked,
     maxCand: Math.max(6, Math.min(106, +$('#o-cand').value || 34)),
     timeLimit,
@@ -1291,6 +1421,7 @@ async function runOptimizer(){
     : `${r.exhaustive ? 'Búsqueda completa: óptimo garantizado' : 'Detenida por límite de tiempo: mejor encontrada'}`
       + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`
       + (r.skipped ? ` · ${r.skipped} artefactos sin precio excluidos` : '')
+      + (r.mixed ? ' · grados mezclados' : '')
       // Repartir entre varios objetivos afloja la cota: casi siempre hace falta más tiempo.
       + (r.exhaustive ? '' : ` · sube el tiempo máximo${multi ? ' (con varios objetivos hacen falta más segundos)' : ''}`
           + ' o baja los candidatos para garantizar el óptimo'));
@@ -1299,9 +1430,10 @@ async function runOptimizer(){
     // Se recalcula con el motor completo para mostrar todas las estadísticas.
     r.best.res = ENGINE.compute({
       container: cont, armor,
-      artefacts: r.best.set.map(i => {
-        const it = D.artefacts[i];
-        return {item: it, level, quality, addSel: it.a.map((_, k) => k).slice(0, ENGINE.addSlots(it.i, level))};
+      artefacts: r.best.picks.map(pk => {
+        const it = D.artefacts[pk.i];
+        return {item: it, level: pk.level, quality: pk.quality,
+                addSel: it.a.map((_, k) => k).slice(0, ENGINE.addSlots(it.i, pk.level))};
       }),
       bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
     });
@@ -1383,10 +1515,10 @@ function renderOptResult(best, parts, cfg){
   const host = $('#o-result');
   host.className = '';
   host.replaceChildren();
-  if (!best.set){
+  if (!best.set || !best.picks.length){
     host.className = 'empty';
     host.textContent = cfg.budget
-      ? 'Ningún conjunto de artefactos cabe en el presupuesto respetando los límites.'
+      ? 'Ningún artefacto cabe en el presupuesto respetando los límites: sale mejor la mochila vacía.'
       : 'No se encontró ninguna build que cumpla los límites.';
     return;
   }
@@ -1427,8 +1559,8 @@ function renderOptResult(best, parts, cfg){
 
   if (PRICES.has()){
     let total = 0, missing = 0;
-    for (const i of best.set){
-      const e = PRICES.estimate(D.artefacts[i].i, cfg.level, cfg.quality);
+    for (const pk of best.picks){
+      const e = PRICES.estimate(D.artefacts[pk.i].i, pk.level, pk.quality);
       e ? total += e.value : missing++;
     }
     const kpi = el('div', {className:'kpi', style:'margin-bottom:12px'},
@@ -1445,27 +1577,33 @@ function renderOptResult(best, parts, cfg){
     pad.append(kpi);
   }
 
+  // Se agrupa por artefacto y grado: al mezclar, dos Torbellinos de rareza distinta son
+  // dos líneas diferentes porque no cuestan lo mismo ni rinden lo mismo.
   const counts = new Map();
-  for (const i of best.set) counts.set(i, (counts.get(i) || 0) + 1);
-  for (const [i, n] of counts){
-    const it = D.artefacts[i];
+  for (const pk of best.picks){
+    const key = `${pk.i}|${pk.level}|${pk.quality}`;
+    counts.set(key, counts.get(key) ? {...counts.get(key), n: counts.get(key).n + 1} : {...pk, n: 1});
+  }
+  for (const pk of counts.values()){
+    const it = D.artefacts[pk.i];
     const img = el('img', {src: ICON(it), alt:''}); img.onerror = () => img.style.visibility = 'hidden';
-    const e = PRICES.has() ? PRICES.estimate(it.i, cfg.level, cfg.quality) : null;
+    const e = PRICES.has() ? PRICES.estimate(it.i, pk.level, pk.quality) : null;
     const row = el('div', {className:'slot', style:'margin-bottom:6px'}, img,
-      el('span', {className:'nm', textContent: (n > 1 ? `${n}× ` : '') + it.n.es}));
+      el('span', {className:'nm', textContent: (pk.n > 1 ? `${pk.n}× ` : '') + it.n.es}));
     if (e) row.append(el('span', {className:'qt price' + (e.exact ? '' : ' est'),
-      textContent: PRICES.fmt(e.value * n)}));
-    row.append(el('span', {className:'qt', textContent:`+${cfg.level} · ${cfg.quality}%`,
-      style:`color:${RARITY_COLOR(cfg.quality)}`}));
+      textContent: PRICES.fmt(e.value * pk.n)}));
+    row.append(el('span', {className:'qt', textContent:`+${pk.level} · ${pk.quality}%`,
+      style:`color:${RARITY_COLOR(pk.quality)}`}));
     pad.append(row);
   }
   const apply = el('button', {className:'primary', textContent:'Aplicar esta build', style:'margin-top:10px'});
   apply.onclick = () => {
     // La búsqueda puede haberse hecho para otra mochila: se lleva también a la Calculadora.
     if (cfg.container) state.containerId = cfg.container.i;
-    state.artefacts = best.set.map(i => {
-      const it = D.artefacts[i];
-      return {id: it.i, level: cfg.level, quality: cfg.quality, addSel: it.a.map((_,k)=>k).slice(0, ENGINE.addSlots(it.i, cfg.level))};
+    state.artefacts = best.picks.map(pk => {
+      const it = D.artefacts[pk.i];
+      return {id: it.i, level: pk.level, quality: pk.quality,
+              addSel: it.a.map((_,k)=>k).slice(0, ENGINE.addSlots(it.i, pk.level))};
     });
     while (state.artefacts.length < capacity()) state.artefacts.push(null);
     switchTab('calc'); refresh();
@@ -1676,6 +1814,19 @@ function init(){
       ? 'Instantánea generada contra la API de demostración: los precios son ficticios.'
       : `Instantánea del historial de subasta. Regenérala con tools/gen_prices.py --region ${PRICES.region.toLowerCase()}`;
     $('#o-budget-wrap').classList.remove('hidden');
+    // Mezclar grados sólo tiene sentido con precios: es un intercambio entre potencia y dinero.
+    $('#o-mix-wrap').classList.remove('hidden');
+    const mixNote = () => {
+      const q = $('#o-mix-qual').checked, l = $('#o-mix-lvl').checked;
+      $('#o-mix-note').textContent = !q && !l
+        ? 'Todas las piezas van al nivel y la rareza de arriba.'
+        : `Cada hueco puede llevar ${[q ? 'una rareza' : null, l ? 'un nivel' : null].filter(Boolean).join(' y ')}`
+          + ' distinto: con presupuesto suele salir una build mejor por el mismo dinero, a costa'
+          + ' de explorar bastantes más combinaciones.';
+    };
+    $('#o-mix-qual').onchange = mixNote;
+    $('#o-mix-lvl').onchange = mixNote;
+    mixNote();
     const note = $('#o-budget-note');
     const syncNote = () => {
       note.textContent = $('#o-percost').checked
