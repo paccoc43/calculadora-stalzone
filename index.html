@@ -65,6 +65,7 @@ main{padding:16px;max-width:1500px;margin:0 auto}
 .chip{font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;user-select:none}
 .chip.on{border-color:var(--acc2);color:var(--acc);background:#16261a}
 .chip.dim{opacity:.4;cursor:not-allowed}
+.chip.ro{cursor:default;color:var(--fg)}   /* stat fija: se muestra, no se elige */
 
 /* resultados */
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 14px}
@@ -88,8 +89,19 @@ main{padding:16px;max-width:1500px;margin:0 auto}
 .opt{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:7px;cursor:pointer}
 .opt:hover{background:var(--panel2)}
 .opt img{width:30px;height:30px;object-fit:contain;flex:none}
-.opt .sub{font-size:11px;color:var(--muted)}
+.opt .txt{flex:1;min-width:0}
+.opt .sub{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .opt .meta{margin-left:auto;font-size:11px;color:var(--muted);text-align:right;flex:none}
+/* La flecha es parte de la fila, no un control aparte: sin caja, sólo el glifo. El glifo es
+   pequeño pero la zona sensible ocupa el alto entero de la fila; el redondel del hover la enseña. */
+.opt .exp{flex:none;width:38px;height:34px;display:grid;place-items:center;background:none;border:none;
+  border-radius:8px;padding:0;font-size:13px;line-height:1;color:var(--muted);transition:transform .15s,color .15s,background .15s}
+.opt .exp:hover:not(:disabled){background:rgba(255,255,255,.07);border:none;color:var(--acc)}
+.opt .exp.on{transform:rotate(180deg);color:var(--acc)}
+.optrow{border-radius:7px}
+.optrow:has(.det:not(.hidden)){background:var(--panel2)}   /* fila abierta: detalle y cabecera juntos */
+.det{padding:0 10px 9px 49px}
+.det .note{margin:5px 0 0;font-size:10px;text-transform:uppercase;letter-spacing:.6px}
 
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{padding:5px 10px;text-align:right;border-bottom:1px solid var(--line);font-size:13px}
@@ -607,6 +619,11 @@ function buildObject(st = state){
 }
 
 const fmt = (v, pct) => (v >= 0 ? '' : '-') + Math.abs(v).toFixed(2) + (pct ? '%' : '');
+/** Eficiencia de la mochila elegida, que multiplica todas las stats menos las acumulaciones. */
+const contEff = () => state.containerId ? CNT[state.containerId].eff : 100;
+/** Etiqueta de una stat de artefacto ya valorada para un nivel y una calidad: «Vitalidad +42.50». */
+const statLabel = (st, level, quality) =>
+  `${statName(st[0])} ${fmt(ENGINE.statValue(st, level, quality, ENGINE.rarityOf(quality), contEff()), !!st[4])}`;
 const $ = s => document.querySelector(s);
 const el = (tag, props = {}, ...kids) => {
   const n = Object.assign(document.createElement(tag), props);
@@ -617,7 +634,11 @@ const el = (tag, props = {}, ...kids) => {
 /* =========================================================================
    MODAL SELECTOR
    ========================================================================= */
-function openPicker({title, items, meta, onPick}){
+/**
+ * @param detail [[rótulo, [etiquetas…]], …] que se pliega tras una flecha, para no cargar la
+ *               lista con lo que sólo se mira de vez en cuando. Se busca también aquí dentro.
+ */
+function openPicker({title, items, meta, detail, onPick}){
   const host = $('#modal-host');
   const input = el('input', {type:'text', placeholder:'Buscar…'});
   const list = el('div', {className:'list'});
@@ -625,17 +646,37 @@ function openPicker({title, items, meta, onPick}){
   const wrap = el('div', {className:'modal'}, box);
   const close = () => host.replaceChildren();
 
+  const detailOf = it => (detail ? detail(it) : []).filter(([, xs]) => xs.length);
   const render = () => {
     const q = input.value.trim().toLowerCase();
-    const rows = items.filter(it => !q || it.n.es.toLowerCase().includes(q) || it.n.en.toLowerCase().includes(q));
+    // Se busca también en el detalle plegado: si ahí dentro pone «radiación», debe encontrarse.
+    const hay = it => `${it.n.es} ${it.n.en} ${CAT_ES[it.c] || ''} ${detailOf(it).map(([, xs]) => xs.join(' ')).join(' ')}`;
+    const rows = items.filter(it => !q || hay(it).toLowerCase().includes(q));
     list.replaceChildren(...rows.map(it => {
       const img = el('img', {src: ICON(it), alt: '', loading: 'lazy'});
       img.onerror = () => { img.style.visibility = 'hidden'; };
       const o = el('div', {className:'opt'}, img,
-        el('div', {}, el('div', {textContent: it.n.es}), el('div', {className:'sub', textContent: CAT_ES[it.c] || ''})),
+        el('div', {className:'txt'}, el('div', {textContent: it.n.es}),
+          el('div', {className:'sub', textContent: CAT_ES[it.c] || ''})),
         el('div', {className:'meta', innerHTML: meta ? meta(it) : ''}));
       o.onclick = () => { close(); onPick(it); };
-      return o;
+      const row = el('div', {className:'optrow'}, o);
+
+      const det = detailOf(it);
+      if (det.length){
+        const panel = el('div', {className:'det hidden'});
+        for (const [rotulo, etiquetas] of det)
+          panel.append(el('div', {className:'note', textContent: rotulo}),
+            el('div', {className:'chips'}, ...etiquetas.map(t => el('div', {className:'chip ro', textContent:t}))));
+        const exp = el('button', {className:'exp', textContent:'⌄', title:'Ver estadísticas'});
+        exp.onclick = e => {
+          e.stopPropagation();                       // mirar las stats no debe elegir el item
+          exp.classList.toggle('on', !panel.classList.toggle('hidden'));
+        };
+        o.append(exp);
+        row.append(panel);
+      }
+      return row;
     }));
     if (!rows.length) list.replaceChildren(el('div', {className:'empty', textContent:'Sin resultados'}));
   };
@@ -732,20 +773,35 @@ function renderArtefacts(){
       head.append(img, nm, pr, qt, x);
 
       const body = el('div', {className:'body'});
+      // Los chips llevan el valor ya calculado, así que hay que repintarlos al mover los
+      // deslizadores; se llenan más abajo, cuando se crean.
+      const live = [];
+      const chip = (st, cls) => {
+        const c = el('div', {className: cls, textContent: statLabel(st, cfg.level, cfg.quality)});
+        live.push([c, st]);
+        return c;
+      };
+      const paintChips = () => { for (const [c, st] of live) c.textContent = statLabel(st, cfg.level, cfg.quality); };
       body.append(sliderRow('Nivel', cfg.level, 0, 15, 1, (v, commit) => {
         const prev = ENGINE.addSlots(cfg.id, cfg.level);
         cfg.level = v; syncAddSel(cfg, prev);
         qt.textContent = `+${cfg.level} · ${cfg.quality}%`;
-        showPrice();
+        showPrice(); paintChips();
         commit ? refresh() : recalc();
       }, [0,5,10,15]));
       body.append(sliderRow('Calidad %', cfg.quality, 0, 190, 1, (v, commit) => {
         cfg.quality = v;
         qt.textContent = `+${cfg.level} · ${cfg.quality}%`;
         qt.style.color = RARITY_COLOR(v);
-        showPrice();
+        showPrice(); paintChips();
         commit ? refresh() : recalc();
       }, [0,100,115,130,145,160,175]));
+
+      // Stats fijas: no se eligen, pero son la mitad de lo que aporta el artefacto y hasta
+      // ahora sólo se veían sumadas al resto de la build.
+      if (it.s.length)
+        body.append(el('label', {textContent:'Stats base'}),
+          el('div', {className:'chips'}, ...it.s.map(st => chip(st, 'chip ro'))));
 
       const slots = ENGINE.addSlots(it.i, cfg.level);
       if (it.a.length){
@@ -754,9 +810,7 @@ function renderArtefacts(){
         it.a.forEach((st, idx) => {
           const on = cfg.addSel.includes(idx);
           const full = !on && cfg.addSel.length >= slots;
-          const v = ENGINE.statValue(st, cfg.level, cfg.quality, ENGINE.rarityOf(cfg.quality), state.containerId ? CNT[state.containerId].eff : 100);
-          const c = el('div', {className:'chip' + (on ? ' on' : '') + (full ? ' dim' : ''),
-            textContent:`${statName(st[0])} ${fmt(v, !!st[4])}`});
+          const c = chip(st, 'chip' + (on ? ' on' : '') + (full ? ' dim' : ''));
           if (!full) c.onclick = () => {
             if (on) cfg.addSel = cfg.addSel.filter(x => x !== idx);
             else cfg.addSel.push(idx);
@@ -817,10 +871,14 @@ function pickArtefact(i){
   const lvl = prev0 ? prev0.level : 15, qual = prev0 ? prev0.quality : 100;
   openPicker({
     title:'Elegir artefacto', items: D.artefacts,
+    // Qué da cada uno, con los valores del nivel y la calidad del hueco que se está llenando.
+    detail: it => [
+      [`Estadísticas base · +${lvl} · ${qual}%`, it.s.map(st => statLabel(st, lvl, qual))],
+      ['Adicionales (se desbloquean con el nivel)', it.a.map(st => statLabel(st, lvl, qual))],
+    ],
     meta: it => {
       const e = PRICES.has() ? PRICES.estimate(it.i, lvl, qual) : null;
-      const price = e ? `<span class="price${e.exact ? '' : ' est'}">${PRICES.fmt(e.value)}</span><br>` : '';
-      return `${price}<span style="color:var(--muted)">${it.s.length} stats</span>`;
+      return e ? `<span class="price${e.exact ? '' : ' est'}">${PRICES.fmt(e.value)}</span>` : '';
     },
     onPick: it => {
       const prev = state.artefacts[i];

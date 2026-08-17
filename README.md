@@ -61,6 +61,11 @@ el 85 % y el 100 % del extremo alto, según la posición dentro de la franja de 
 un hueco a **+5**, otro a **+10** y otro a **+15** (el artefacto *Rubik* desbloquea uno más ya a +1).
 Se eligen con los botones bajo cada artefacto y se calculan con la misma fórmula.
 
+En la Calculadora, cada hueco lista las estadísticas **base** del artefacto además de las
+adicionales, con el valor ya resuelto para su nivel y calidad. En la lista de selección van
+plegadas tras la flecha de cada fila, para poder compararlas sin recargar la lista; el buscador
+mira dentro aunque estén cerradas, así que «radiación» encuentra los artefactos que la llevan.
+
 ### Cálculos derivados
 
 ```
