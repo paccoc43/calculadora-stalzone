@@ -12,10 +12,8 @@ const ctx = {window: {}, console, performance, setTimeout, Math, Date};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('data/gamedata.js', 'utf8'), ctx);
 
-const html = fs.readFileSync('index.html', 'utf8');
-const grab = re => html.match(re)[0];
-vm.runInContext(grab(/const ENGINE = \(\(\) => \{[\s\S]*?\n\}\)\(\);/) + '\n'
-  + grab(/const OPTIMIZER = \(\(\) => \{[\s\S]*?\n\}\)\(\);/)
+const src = f => fs.readFileSync(f, 'utf8');
+vm.runInContext(src('engine.js') + '\n' + src('optimizer.js')
   + '\n;globalThis.ENGINE=ENGINE;globalThis.OPTIMIZER=OPTIMIZER;', ctx);
 const D = ctx.window.SZ_DATA, E = ctx.ENGINE, O = ctx.OPTIMIZER;
 

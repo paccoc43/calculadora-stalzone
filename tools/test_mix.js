@@ -13,8 +13,7 @@ const ctx = {window: {}, console, performance, setTimeout, Math, Date};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('data/gamedata.js', 'utf8'), ctx);
 
-const html = fs.readFileSync('index.html', 'utf8');
-const grab = re => html.match(re)[0];
+const src = f => fs.readFileSync(f, 'utf8');
 const D0 = ctx.window.SZ_DATA;
 
 // Precios sintéticos deterministas: caros con el nivel y con la rareza, como los reales.
@@ -31,9 +30,7 @@ for (const it of D0.artefacts){
   FAKE.items[it.i] = {a: Math.log(base), b: 0.075, c: 1.369, n: 120, o};
 }
 ctx.window.SZ_PRICES = FAKE;
-vm.runInContext(grab(/const ENGINE = \(\(\) => \{[\s\S]*?\n\}\)\(\);/) + '\n'
-  + grab(/const OPTIMIZER = \(\(\) => \{[\s\S]*?\n\}\)\(\);/) + '\n'
-  + grab(/const PRICES = \(\(\) => \{[\s\S]*?\n\}\)\(\);/)
+vm.runInContext(src('engine.js') + '\n' + src('optimizer.js') + '\n' + src('pricing.js')
   + '\n;globalThis.ENGINE=ENGINE;globalThis.OPTIMIZER=OPTIMIZER;globalThis.PRICES=PRICES;', ctx);
 const D = ctx.window.SZ_DATA, E = ctx.ENGINE, O = ctx.OPTIMIZER, P = ctx.PRICES;
 

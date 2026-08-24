@@ -1,9 +1,7 @@
 const fs=require('fs'),vm=require('vm');
 const ctx={window:{},console,performance};vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('data/gamedata.js','utf8'),ctx);
-const html=fs.readFileSync('index.html','utf8');
-const m=html.match(/const ENGINE = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
-vm.runInContext(m[0]+';globalThis.ENGINE=ENGINE;',ctx);
+vm.runInContext(fs.readFileSync('engine.js','utf8')+';globalThis.ENGINE=ENGINE;',ctx);
 const D=ctx.window.SZ_DATA,E=ctx.ENGINE;
 const f=(L,n)=>L.find(x=>x.n.en===n);
 const cont=f(D.containers,'Secret Valley 35 Backpack');

@@ -9,7 +9,11 @@ optimizar con presupuesto.
 No necesita instalación: abre `index.html` en el navegador.
 
 ```
-index.html          Interfaz, motor de cálculo y optimizador (todo en uno)
+index.html          Marcado de la interfaz, iconos y toda la lógica que toca el DOM
+styles.css          Estilos
+engine.js           Motor de cálculo: replica la calculadora oficial de la wiki
+optimizer.js        Búsqueda de la mejor combinación (branch & bound)
+pricing.js          Estimador de precios a partir del historial de subasta
 data/gamedata.js    Catálogo: 106 artefactos, 56 contenedores, 137 armaduras
 data/prices.js      Precios de subasta (opcional, se genera aparte)
 tools/gen_data.py   Regenera el catálogo desde la API de stalzone.wiki

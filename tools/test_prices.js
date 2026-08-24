@@ -19,11 +19,8 @@ const ctx = {window: {}, console, performance, setTimeout, Math, Date};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('data/gamedata.js', 'utf8'), ctx);
 
-const html = fs.readFileSync('index.html', 'utf8');
-const grab = re => html.match(re)[0];
-const eng = grab(/const ENGINE = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
-const opt = grab(/const OPTIMIZER = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
-const pri = grab(/const PRICES = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
+const src = f => fs.readFileSync(f, 'utf8');
+const eng = src('engine.js'), opt = src('optimizer.js'), pri = src('pricing.js');
 
 const D = ctx.window.SZ_DATA;
 // Precios inventados pero deterministas para todos los artefactos del catálogo.
