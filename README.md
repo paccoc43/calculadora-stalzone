@@ -92,6 +92,14 @@ sin superar los límites de acumulación. La **mochila se elige en el propio opt
 con la de la pestaña *Calculadora* y a partir de ahí va por libre; al aplicar la build se lleva
 también a la Calculadora). La armadura sí es la de la *Calculadora*.
 
+**Vitalidad mínima.** Persiguiendo otra cosa —peso de carga, aguante, velocidad— el óptimo suele
+salir con la vitalidad muy negativa, que en el juego es una build con la que no se sobrevive. La
+casilla *No dejar la vitalidad por debajo de* pone un suelo que la búsqueda respeta. Es la imagen
+especular de un límite de acumulación: donde aquél es un techo, éste es un piso, y el branch &
+bound lo poda igual —si ni llenando los huecos que quedan con lo que más aporta se llega al
+mínimo, la rama está muerta—. Si ninguna combinación lo cumple, se avisa en vez de devolver la
+mejor de las inválidas.
+
 Es un **branch & bound** exacto: representa la build como un vector de contribuciones y acota cada
 rama sustituyendo los componentes del objetivo por el mejor aporte que queda disponible. Como todas
 las transformaciones posteriores (protección, salud efectiva, estabilidad…) son monótonas crecientes
@@ -244,7 +252,7 @@ Desde la raíz del repositorio:
 
 ```bash
 node tools/test_reference.js   # build de referencia: 26/26 estadísticas exactas
-node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuerza bruta
+node tools/test_engine.js      # 4000 builds aleatorias + branch & bound vs fuerza bruta (72 casos)
 node tools/test_prices.js      # estimador de precios + presupuesto y «por rublo» vs fuerza bruta
 node tools/test_multigoal.js   # objetivo múltiple: normalización y reparto de pesos vs fuerza bruta
 node tools/test_mix.js         # mezcla de niveles y rarezas vs fuerza bruta sobre todas las versiones

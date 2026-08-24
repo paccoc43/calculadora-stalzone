@@ -152,11 +152,12 @@ const OPTIMIZER = (() => {
 
   /**
    * Frente de Pareto: se queda con lo que nadie mejora a la vez en precio, en cada componente
-   * del objetivo y en cada acumulación limitada. Al mezclar grados hay decenas de versiones del
-   * mismo artefacto y casi todas son basura —la misma stat por más dinero—, pero descartarlas
-   * por «aporta menos» tiraría justo las baratas que hacen falta para cuadrar el presupuesto.
+   * del objetivo, en cada acumulación limitada y en cada estadística con mínimo. Al mezclar
+   * grados hay decenas de versiones del mismo artefacto y casi todas son basura —la misma stat
+   * por más dinero—, pero descartarlas por «aporta menos» tiraría justo las baratas que hacen
+   * falta para cuadrar el presupuesto.
    */
-  function undominated(list, comps, accIdx){
+  function undominated(list, comps, accIdx, minIdx){
     const out = [];
     for (const s of list.slice().sort((a, b) => (a.cost || 0) - (b.cost || 0) || b.gain - a.gain)){
       let dominated = false;
@@ -166,6 +167,8 @@ const OPTIMIZER = (() => {
         for (const [ci, d] of comps)
           if (d > 0 ? k.v[ci] < s.v[ci] - 1e-12 : k.v[ci] > s.v[ci] + 1e-12){ better = false; break; }
         if (better) for (const li of accIdx) if (k.v[li] > s.v[li] + 1e-12){ better = false; break; }
+        // En un mínimo manda lo contrario que en una acumulación: cuanto más aporte, mejor.
+        if (better) for (const mi of (minIdx || [])) if (k.v[mi] < s.v[mi] - 1e-12){ better = false; break; }
         if (better){ dominated = true; break; }
       }
       if (!dominated) out.push(s);
@@ -179,6 +182,8 @@ const OPTIMIZER = (() => {
    * @param p.priceOf    (id, level, quality) → precio; obligatorio para mezclar grados con precio
    * @param p.mixLevel   permitir cualquier nivel hasta p.level, no sólo p.level
    * @param p.mixQuality permitir cualquier rareza hasta p.quality, no sólo p.quality
+   * @param p.limits     {clave: tope} — la build no puede pasar de ahí (acumulaciones)
+   * @param p.minimums   {clave: suelo} — la build no puede bajar de ahí (p. ej. vitalidad ≥ 0)
    * @param p.budget     presupuesto máximo para el conjunto de artefactos (0 = sin límite)
    * @param p.perCost    maximizar la ganancia por rublo en lugar de la ganancia absoluta
    * @param p.onProgress callback(nodes, elapsed) — puede devolver una promesa para ceder el hilo
@@ -190,6 +195,11 @@ const OPTIMIZER = (() => {
     const spec = goalSpec(p.goalId, p.reactions);
     const limits = p.limits || {};
     const limEntries = Object.keys(limits).filter(k => IDX[k] !== undefined).map(k => [IDX[k], limits[k]]);
+    // Un mínimo es la imagen especular de un límite: en vez de un techo que no se puede
+    // pasar, un suelo por debajo del cual la build no vale (una vitalidad negativa, por
+    // ejemplo, mata más que lo que gane el objetivo que se estuviera persiguiendo).
+    const minimums = p.minimums || {};
+    const minEntries = Object.keys(minimums).filter(k => IDX[k] !== undefined).map(k => [IDX[k], minimums[k]]);
     const budget = p.budget > 0 ? p.budget : 0;
     const perCost = !!p.perCost;
     const costs = p.costs || null;
@@ -203,6 +213,7 @@ const OPTIMIZER = (() => {
     // Aporte individual de cada artefacto en cada grado, para ordenar y elegir candidatos.
     const compIdx = spec.comps.map(([k, d]) => [IDX[k], d]);
     const accIdx = limEntries.map(([li]) => li);
+    const minIdx = minEntries.map(([mi]) => mi);
     const grid = grades(p);
     const mixing = grid.length > 1;
     let scored = [];
@@ -216,7 +227,7 @@ const OPTIMIZER = (() => {
       // Se poda artefacto a artefacto antes de juntarlo todo: es lo que mantiene manejable
       // el catálogo cuando cada uno aporta hasta 96 versiones de sí mismo.
       scored = scored.concat(mixing
-        ? undominated(needCost ? forItem.filter(s => s.cost > 0) : forItem, compIdx, accIdx)
+        ? undominated(needCost ? forItem.filter(s => s.cost > 0) : forItem, compIdx, accIdx, minIdx)
         : forItem);
     }
     const priced = needCost ? scored.filter(s => s.cost > 0) : scored;
@@ -265,9 +276,15 @@ const OPTIMIZER = (() => {
       afford.slice().sort((a, b) => a.v[li] - b.v[li]).slice(0, 6)
         .filter(s => s.v[li] < 0).forEach(s => pool.add(s));
     }
+    // Y los que más aportan a cada mínimo: si el objetivo tira de artefactos que restan
+    // vitalidad, hace falta tener a mano con qué compensarlos o no habría solución posible.
+    for (const [mi] of minEntries){
+      afford.slice().sort((a, b) => b.v[mi] - a.v[mi]).slice(0, 6)
+        .filter(s => s.v[mi] > 0).forEach(s => pool.add(s));
+    }
     // Quedarse sin candidatos (presupuesto que no da ni para un artefacto) no es «sin solución»:
     // la build vacía sigue siendo válida y el bucle la registra igual, con M = 0.
-    const cands = (mixing ? undominated([...pool], compIdx, accIdx) : [...pool])
+    const cands = (mixing ? undominated([...pool], compIdx, accIdx, minIdx) : [...pool])
       .sort((a, b) => b.gain - a.gain);
 
     const M = cands.length;
@@ -280,6 +297,12 @@ const OPTIMIZER = (() => {
     const sufLim = limEntries.map(([li]) => {
       const a = new Float64Array(M + 1);
       for (let j = M - 1; j >= 0; j--) a[j] = Math.min(a[j + 1], cands[j].v[li]);
+      return a;
+    });
+    // Para los mínimos hace falta el sufijo por arriba: el mayor aporte que aún se puede meter.
+    const sufMin = minEntries.map(([mi]) => {
+      const a = new Float64Array(M + 1);
+      for (let j = M - 1; j >= 0; j--) a[j] = Math.max(a[j + 1], cands[j].v[mi]);
       return a;
     });
 
@@ -296,6 +319,7 @@ const OPTIMIZER = (() => {
       if (perCost && cost <= 0) return;              // la build vacía no tiene rendimiento
       const t = evaluate(raw, C, scratch);
       for (const [li, lim] of limEntries) if (t[li] > lim + 1e-9) return;
+      for (const [mi, min] of minEntries) if (t[mi] < min - 1e-9) return;
       const v = score(spec.f(t));
       if (!best || v > best.value)
         best = {value: v, cost, picks: Array.from(choice.subarray(0, depth))};
@@ -319,6 +343,13 @@ const OPTIMIZER = (() => {
         probe[limEntries[c][0]] += sufLim[c][start] * slotsLeft;
         const t = evaluate(probe, C, scratch);
         if (t[limEntries[c][0]] > limEntries[c][1] + 1e-6) return true;
+      }
+      // Ni llenando los huecos que quedan con lo que más aporta se llega al suelo: rama muerta.
+      for (let c = 0; c < minEntries.length; c++){
+        for (let i = 0; i < N; i++) probe[i] = raw[i];
+        probe[minEntries[c][0]] += sufMin[c][start] * slotsLeft;
+        const t = evaluate(probe, C, scratch);
+        if (t[minEntries[c][0]] < minEntries[c][1] - 1e-6) return true;
       }
       return false;
     };

@@ -146,6 +146,10 @@
             <label style="cursor:pointer"><input type="checkbox" id="o-limits" checked> Respetar límites de acumulación</label>
           </div>
           <div id="o-limit-rows" style="margin-top:8px"></div>
+          <div style="margin-top:6px">
+            <label style="cursor:pointer"><input type="checkbox" id="o-minvit"> No dejar la vitalidad por debajo de</label>
+          </div>
+          <div id="o-minvit-row" class="hidden" style="margin-top:6px"></div>
           <div id="o-budget-wrap" class="hidden">
             <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
             <label>Presupuesto para los artefactos (₽) — 0 = sin límite</label>
@@ -876,6 +880,11 @@ async function runOptimizer(){
     if (inp && inp.value !== '') limits[k] = +inp.value;
   }
 
+  // Suelo de vitalidad: buscando otra cosa (curación, peso de carga…) el óptimo suele salir
+  // con vitalidad negativa, que en el juego es una build con la que no se sobrevive.
+  const minimums = {};
+  if ($('#o-minvit').checked) minimums.health_bonus = +$('#o-minvit-n').value || 0;
+
   const budget = PRICES.has() ? Math.max(0, +$('#o-budget').value || 0) : 0;
   const perCost = PRICES.has() && $('#o-percost').checked;
   const costs = PRICES.has()
@@ -888,7 +897,7 @@ async function runOptimizer(){
 
   const armor = state.armorId ? {item: ARM[state.armorId], level: state.armorLevel} : null;
   const common = {
-    items: D.artefacts, container: cont, armor, level, quality, limits, costs, budget,
+    items: D.artefacts, container: cont, armor, level, quality, limits, minimums, costs, budget,
     mixLevel, mixQuality,
     priceOf: PRICES.has() ? (id, lv, q) => { const e = PRICES.estimate(id, lv, q); return e ? e.value : null; } : null,
     allowDup: $('#o-dup').checked,
@@ -940,6 +949,11 @@ async function runOptimizer(){
   $('#o-stop').disabled = true; $('#o-run').disabled = false;
   $('#o-bar').style.width = '100%';
   setOptStatus(optAbort && !r.best ? 'Búsqueda cancelada.'
+    : !r.best ? (r.exhaustive
+        ? 'Ninguna combinación cumple las condiciones. Prueba a bajar el mínimo de vitalidad,'
+          + ' a aflojar los límites de acumulación o a subir el presupuesto.'
+        : 'No ha dado tiempo a encontrar ninguna combinación que cumpla las condiciones:'
+          + ' sube el tiempo máximo o aflójalas.')
     : `${r.exhaustive ? 'Búsqueda completa: óptimo garantizado' : 'Detenida por límite de tiempo: mejor encontrada'}`
       + ` · ${r.nodes.toLocaleString('es')} combinaciones · ${(r.elapsed/1000).toFixed(1)} s · ${r.candidates} candidatos`
       + (r.skipped ? ` · ${r.skipped} artefactos sin precio excluidos` : '')
@@ -1368,6 +1382,13 @@ function init(){
     lr.append(row);
   }
   $('#o-limits').onchange = e => lr.classList.toggle('hidden', !e.target.checked);
+
+  // Mínimo de vitalidad: misma pinta que una fila de límite, pero es un suelo, no un techo.
+  const mv = $('#o-minvit-row');
+  mv.append(el('div', {className:'ctl', style:'grid-template-columns:1fr 90px;margin-bottom:0'},
+    el('label', {}, statIcon('health_bonus'), ` ${statName('health_bonus')} ≥`),
+    el('input', {type:'number', id:'o-minvit-n', step:'1', value:'0'})));
+  $('#o-minvit').onchange = e => mv.classList.toggle('hidden', !e.target.checked);
   $('#o-run').onclick = () => runOptimizer();
   $('#o-stop').onclick = () => { optAbort = true; };
   renderOptGoals();

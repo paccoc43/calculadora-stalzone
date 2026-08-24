@@ -69,11 +69,14 @@ console.log(worst < 1e-9
   const subset = D.artefacts.slice(0, 26);
   const goals = ['__eh', '__hps', 'stamina_bonus', 'max_weight_bonus', 'radiation_accumulation', 'stopping_protection'];
   const limitSets = [{}, {radiation_accumulation: 0.5, psycho_accumulation: 0.5, biological_accumulation: 0.5}];
+  // Suelos: sin ninguno, con la vitalidad a cero (el caso del botón) y con dos a la vez.
+  const minSets = [{}, {health_bonus: 0}, {health_bonus: 20, stamina_bonus: 0}];
 
   let fails = 0, checks = 0;
-  for (const goalId of goals) for (const limits of limitSets) for (const allowDup of [true, false]){
+  for (const goalId of goals) for (const limits of limitSets) for (const minimums of minSets)
+  for (const allowDup of [true, false]){
     const params = {items: subset, container: cont, armor, level: 15, quality: 175, goalId, limits,
-      allowDup, maxCand: 999, timeLimit: 60000, bleeding: 0, burning: false, reactions: []};
+      minimums, allowDup, maxCand: 999, timeLimit: 60000, bleeding: 0, burning: false, reactions: []};
     const r = await O.search(params);
 
     // Fuerza bruta exhaustiva sobre el mismo subconjunto
@@ -81,12 +84,14 @@ console.log(worst < 1e-9
     const spec = O.goalSpec(goalId, []);
     const vecs = subset.map(it => O.artefactVector(it, 15, 175, C.eff));
     const limEntries = Object.keys(limits).map(k => [O.IDX[k], limits[k]]);
+    const minEntries = Object.keys(minimums).map(k => [O.IDX[k], minimums[k]]);
     let bruteBest = -Infinity, bruteSet = null;
     const raw = new Float64Array(O.KEYS.length);
     const rec = (start, depth) => {
       const t = O.evaluate(raw, C);
       let ok = true;
       for (const [li, lim] of limEntries) if (t[li] > lim + 1e-9){ ok = false; break; }
+      if (ok) for (const [mi, min] of minEntries) if (t[mi] < min - 1e-9){ ok = false; break; }
       if (ok){ const v = spec.f(t); if (v > bruteBest){ bruteBest = v; bruteSet = depth; } }
       if (depth >= cont.cap) return;
       for (let j = start; j < vecs.length; j++){
@@ -99,7 +104,8 @@ console.log(worst < 1e-9
     checks++;
     const got = r.best ? r.best.value : -Infinity;
     const ok = r.exhaustive && Math.abs(got - bruteBest) < 1e-7;
-    if (!ok){ fails++; console.log(`  FALLO ${goalId} dup=${allowDup} lim=${!!limEntries.length}: B&B=${got} fuerza bruta=${bruteBest} exh=${r.exhaustive}`); }
+    if (!ok){ fails++; console.log(`  FALLO ${goalId} dup=${allowDup} lim=${!!limEntries.length}`
+      + ` min=${JSON.stringify(minimums)}: B&B=${got} fuerza bruta=${bruteBest} exh=${r.exhaustive}`); }
   }
   console.log(fails ? `FALLO ${fails}/${checks} casos del optimizador` : `OK  ${checks} casos: el branch & bound encuentra el mismo óptimo que la fuerza bruta`);
 
