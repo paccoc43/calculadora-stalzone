@@ -178,6 +178,19 @@ python tools/gen_prices.py                    # usa la región de .env
 python tools/gen_prices.py --region eu        # ru | eu | na | sea
 ```
 
+La descarga va en paralelo (`--workers`, 8 hilos por defecto) sobre una conexión persistente
+por hilo, con un ritmo compartido de una petición cada `--delay` segundos (0,2 por defecto) que
+se afloja solo si la API contesta 429.
+
+**La mitad del catálogo no se subasta nunca.** En EU sólo 149 de los 299 objetos tienen alguna
+venta: el resto son 110 armaduras, 36 mochilas y 4 artefactos que nadie ha llegado a publicar.
+La API no permite preguntar de una vez qué se está subastando —sólo hay endpoints por objeto—,
+así que el generador se apunta cuáles son y no vuelve a pedirlos hasta pasados `--recheck-days`
+días (7 por defecto). La lista se deduce del `prices.js` anterior: lo que no aparece en `items`
+es justo lo que no dio precio, y sólo se descarta dentro de las categorías que sí tengan algún
+objeto con precio, para que un `--only` previo no dé por muerta una categoría entera.
+`--recheck-days 0` fuerza la comprobación completa.
+
 Las credenciales viven en `.env`, que está en `.gitignore` y **no debe subirse al repositorio**;
 `.env.example` documenta el formato. También valen las variables de entorno del mismo nombre.
 Se consiguen registrando una aplicación en el Discord de EXBO con el comando `/newapp`, y requieren

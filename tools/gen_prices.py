@@ -9,6 +9,9 @@ Uso (desde la raíz del repositorio):
     python tools/gen_prices.py --demo          # API de demostración (datos ficticios)
     python tools/gen_prices.py --token eyJ...  # token de aplicación ya obtenido
 
+    python tools/gen_prices.py --recheck-days 0   # recomprueba también los que no cotizaban
+    python tools/gen_prices.py --workers 1        # descarga secuencial (para depurar)
+
 Las credenciales se leen de .env (que está en .gitignore) o de las variables de entorno
 STALZONE_CLIENT_ID / STALZONE_CLIENT_SECRET / STALZONE_REGION. Ver .env.example.
 
@@ -19,13 +22,16 @@ Fuente: GET /{region}/auction/{item}/history — historial de compras cerradas, 
 calidad y el nivel de mejora de cada lote. Ver https://eapi.stalzone.net/reference
 """
 import argparse
+import concurrent.futures
+import http.client
 import io
 import json
 import math
 import os
+import socket
 import sys
+import threading
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -73,46 +79,105 @@ MAX_LIMIT = 200          # tope que admite el endpoint por petición
 
 # --------------------------------------------------------------------------- HTTP
 
-class Api(object):
-    def __init__(self, base, token, delay, region):
-        self.base = base.rstrip('/')
-        self.token = token
+class Pacer(object):
+    """
+    Reparte el ritmo de peticiones entre todos los hilos: espacia los *inicios*, no los
+    finales, así que la latencia de una petición se solapa con la espera de las demás.
+    Si la API contesta 429 se afloja el ritmo para el resto de la ejecución.
+    """
+
+    def __init__(self, delay):
         self.delay = delay
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self):
+        with self._lock:
+            slot = max(time.time(), self._next)
+            self._next = slot + self.delay
+        pause = slot - time.time()
+        if pause > 0:
+            time.sleep(pause)
+
+    def slow_down(self, factor=1.5, cap=2.0):
+        with self._lock:
+            self.delay = min(cap, self.delay * factor)
+            return self.delay
+
+
+class Api(object):
+    """
+    Cliente con una conexión persistente por hilo: la subasta se consulta un objeto tras
+    otro contra el mismo servidor, y reaprovechar el socket ahorra el saludo TLS —el grueso
+    del tiempo de cada petición— en todas menos la primera.
+    """
+
+    def __init__(self, base, token, pacer, region):
+        u = urllib.parse.urlsplit(base)
+        self.base = base.rstrip('/')
+        self.scheme, self.host, self.prefix = u.scheme, u.netloc, u.path.rstrip('/')
+        self.token = token
+        self.pacer = pacer
         self.region = region
-        self._last = 0.0
+        self._local = threading.local()
+
+    def _conn(self):
+        c = getattr(self._local, 'conn', None)
+        if c is None:
+            cls = http.client.HTTPSConnection if self.scheme == 'https' else http.client.HTTPConnection
+            c = cls(self.host, timeout=60)
+            self._local.conn = c
+        return c
+
+    def _drop(self):
+        c = getattr(self._local, 'conn', None)
+        if c is not None:
+            try:
+                c.close()
+            except Exception:                        # noqa: BLE001 — cerrar nunca debe romper
+                pass
+            self._local.conn = None
 
     def get(self, path, params=None, retries=5):
-        url = self.base + path
+        url = self.prefix + path
         if params:
             url += '?' + urllib.parse.urlencode(params)
         for attempt in range(retries):
-            wait = self.delay - (time.time() - self._last)
-            if wait > 0:
-                time.sleep(wait)
-            req = urllib.request.Request(url, headers={
-                'Authorization': 'Bearer ' + self.token,
-                'Accept': 'application/json',
-                'User-Agent': 'calculadora-artefactos/1.0',
-            })
+            self.pacer.wait()
             try:
-                with urllib.request.urlopen(req, timeout=60) as r:
-                    self._last = time.time()
-                    return json.loads(r.read().decode('utf-8'))
-            except urllib.error.HTTPError as e:
-                self._last = time.time()
-                if e.code in (400, 404):
-                    return None                      # el objeto no cotiza en subasta
-                if e.code in (429, 500, 502, 503) and attempt < retries - 1:
-                    pause = float(e.headers.get('Retry-After') or 0) or 2 ** (attempt + 1)
-                    print('    HTTP %d, reintento en %.0f s' % (e.code, pause))
-                    time.sleep(pause)
-                    continue
-                raise
-            except urllib.error.URLError as e:
+                conn = self._conn()
+                conn.request('GET', url, headers={
+                    'Authorization': 'Bearer ' + self.token,
+                    'Accept': 'application/json',
+                    'User-Agent': 'calculadora-artefactos/1.0',
+                })
+                r = conn.getresponse()
+                body = r.read()
+                status, retry_after = r.status, r.getheader('Retry-After')
+                if r.will_close:
+                    self._drop()
+            except (http.client.HTTPException, socket.error) as e:
+                # Un socket reutilizado puede haber caducado al otro lado: se tira y se reintenta.
+                self._drop()
                 if attempt < retries - 1:
-                    time.sleep(2 ** (attempt + 1))
+                    time.sleep(2 ** attempt)
                     continue
                 raise RuntimeError('sin conexión con %s: %s' % (self.base, e))
+
+            if status in (400, 404):
+                return None                          # el objeto no cotiza en subasta
+            if status == 429 or status in (500, 502, 503):
+                if attempt >= retries - 1:
+                    raise RuntimeError('HTTP %d en %s' % (status, url))
+                if status == 429:
+                    print('    HTTP 429: bajando el ritmo a %.2f s entre peticiones'
+                          % self.pacer.slow_down())
+                pause = float(retry_after or 0) or 2 ** (attempt + 1)
+                time.sleep(pause)
+                continue
+            if status != 200:
+                raise RuntimeError('HTTP %d en %s' % (status, url))
+            return json.loads(body.decode('utf-8'))
         return None
 
 
@@ -138,6 +203,43 @@ def load_gamedata():
     src = io.open(GAMEDATA, encoding='utf-8').read()
     i = src.index('=') + 1
     return json.loads(src[i:src.rindex(';')].strip())
+
+
+def load_previous(path, region, demo):
+    """
+    Lee el prices.js que ya hubiera. Sólo sirve si se generó para la misma región y el
+    mismo servidor: qué objetos llegan a la subasta cambia de una región a otra.
+    """
+    try:
+        src = io.open(path, encoding='utf-8').read()
+        prev = json.loads(src[src.index('=') + 1:src.rindex(';')].strip())
+    except Exception:                                # noqa: BLE001 — sin fichero se descarga todo
+        return {}
+    if prev.get('region') != region.upper() or bool(prev.get('demo')) != bool(demo):
+        return {}
+    return prev
+
+
+def untraded_cache(prev, catalog):
+    """
+    Objetos que ya se sabe que no se subastan, con la fecha en que se comprobó.
+
+    No hace falta que el prices.js traiga la lista apuntada: lo que no aparece en `items`
+    es justo lo que no dio precio, así que la caché se deduce de ahí y las fechas guardadas
+    sólo afinan cuándo toca recomprobar cada uno. Así también sirve un fichero generado
+    antes de que existiera la caché.
+
+    La deducción se hace por categoría y sólo para las que tengan algún objeto con precio,
+    porque una categoría entera vacía puede ser que aquella vez ni se llegara a pedir (--only).
+    """
+    items = (prev or {}).get('items') or {}
+    if not items:
+        return {}
+    seen = prev.get('untraded') or {}
+    day = (prev.get('generated') or '')[:10] or time.strftime('%Y-%m-%d', time.gmtime())
+    priced = set(kind for kind, it in catalog if it['i'] in items)
+    return dict((it['i'], seen.get(it['i'], day)) for kind, it in catalog
+                if kind in priced and it['i'] not in items)
 
 
 def fetch_history(api, item_id, pages):
@@ -333,8 +435,14 @@ def main():
                     help='usa la API de demostración (datos ficticios, sólo para probar)')
     ap.add_argument('--pages', type=int, default=1,
                     help='páginas de 200 ventas por objeto (por defecto: 1)')
-    ap.add_argument('--delay', type=float, default=0.35,
-                    help='segundos entre peticiones (por defecto: 0.35)')
+    ap.add_argument('--delay', type=float, default=0.2,
+                    help='segundos entre el inicio de una petición y el de la siguiente '
+                         '(por defecto: 0.2; súbelo si la API responde 429)')
+    ap.add_argument('--workers', type=int, default=8,
+                    help='descargas simultáneas (por defecto: 8; 1 vuelve a ser secuencial)')
+    ap.add_argument('--recheck-days', type=int, default=7,
+                    help='cada cuántos días se vuelve a comprobar un objeto que no cotizaba '
+                         '(por defecto: 7; 0 los comprueba siempre)')
     ap.add_argument('--only', default='artefact,container,armor',
                     help='categorías a descargar, separadas por comas')
     ap.add_argument('--limit', type=int, default=0,
@@ -355,7 +463,7 @@ def main():
             print('Obteniendo token de aplicación…')
             token = app_token(args.client_id, args.client_secret)
 
-    api = Api(base, token, args.delay, args.region.lower())
+    api = Api(base, token, Pacer(max(0.0, args.delay)), args.region.lower())
 
     data = load_gamedata()
     kinds = [k.strip() for k in args.only.split(',') if k.strip()]
@@ -369,26 +477,64 @@ def main():
     if args.limit:
         catalog = catalog[:args.limit]
 
-    print('Descargando %d objetos de la región %s (%s)…' % (len(catalog), api.region.upper(), base))
+    # Dos tercios largos del catálogo no llegan a subastarse nunca (casi todas las armaduras
+    # y la mitad de las mochilas). Preguntar por ellos en cada ejecución es la mitad del
+    # tiempo para nada, así que se recuerda quiénes son y se recomprueban de vez en cuando.
+    known = untraded_cache(load_previous(args.out, api.region, args.demo), catalog) \
+        if args.recheck_days > 0 else {}
+    today = time.strftime('%Y-%m-%d', time.gmtime())
+    fresh = time.strftime('%Y-%m-%d', time.gmtime(time.time() - args.recheck_days * 86400.0))
+    skipped = dict((i, d) for i, d in known.items() if d >= fresh)
+    pending = [(k, it) for k, it in catalog if it['i'] not in skipped]
+
+    workers = max(1, args.workers)
+    print('Descargando %d objetos de la región %s (%s) con %d hilos…'
+          % (len(pending), api.region.upper(), base, workers))
+    if skipped:
+        print('  (%d que no cotizan se saltan: %d peticiones menos; --recheck-days 0 los '
+              'recomprueba)' % (len(skipped), len(skipped) * args.pages))
+
     obs = {'artefact': {}, 'container': {}, 'armor': {}}
-    untraded, failed = [], []
-    for n, (kind, it) in enumerate(catalog, 1):
+    untraded = dict(skipped)
+    failed = []
+    total = len(pending)
+
+    def work(job):
+        """Lo único que corre en los hilos: bajar el historial de un objeto."""
+        kind, it = job
         name = it['n']['es'] or it['n']['en']
         try:
-            sales = fetch_history(api, it['i'], args.pages)
+            return kind, it, name, fetch_history(api, it['i'], args.pages), None
         except Exception as e:                       # noqa: BLE001 — se informa y se sigue
-            failed.append((it['i'], name, str(e)))
-            print('  [%3d/%d] %-28s ERROR %s' % (n, len(catalog), name[:28], e))
-            continue
-        if sales is None:
-            untraded.append(name)
-            print('  [%3d/%d] %-28s no cotiza' % (n, len(catalog), name[:28]))
-            continue
-        groups = aggregate(sales, kind)
-        if groups:
-            obs[kind][it['i']] = groups
+            return kind, it, name, None, e
+
+    def report(n, kind, it, name, sales, err):
+        """Agrega y va contando. Corre siempre en el hilo principal y en el orden del
+        catálogo, así que no hace falta sincronizar nada ni se entrelazan las líneas."""
+        if err is not None:
+            failed.append((it['i'], name, str(err)))
+            print('  [%3d/%d] %-28s ERROR %s' % (n, total, name[:28], err))
+            return
+        # Sin lotes en la subasta (404), con el historial vacío o con ventas que no dejan
+        # ninguna mediana utilizable, el resultado es el mismo: no hay precio que estimar.
+        # Se apunta para no volver a preguntar por él en la siguiente actualización.
+        groups = aggregate(sales, kind) if sales else {}
+        if not groups:
+            untraded[it['i']] = today
+            print('  [%3d/%d] %-28s no cotiza' % (n, total, name[:28]))
+            return
+        obs[kind][it['i']] = groups
         print('  [%3d/%d] %-28s %4d ventas · %2d combinaciones'
-              % (n, len(catalog), name[:28], len(sales), len(groups)))
+              % (n, total, name[:28], len(sales), len(groups)))
+
+    started = time.time()
+    if workers == 1:
+        for n, job in enumerate(pending, 1):
+            report(n, *work(job))
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for n, res in enumerate(pool.map(work, pending), 1):
+                report(n, *res)
 
     out = {
         'region': api.region.upper(),
@@ -398,6 +544,9 @@ def main():
         'qclasses': QCLASSES,
         'items': {},
         'slopes': {},
+        # Fecha en que se vio que cada objeto no se subasta, para no volver a preguntar por
+        # él en cada ejecución. La calculadora no lo usa: es caché del generador.
+        'untraded': untraded,
     }
     for kind in ('artefact', 'container', 'armor'):
         if not obs[kind]:
@@ -413,9 +562,10 @@ def main():
         json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
         f.write(';\n')
 
-    print('\nEscrito %s (%d KB)' % (args.out, os.path.getsize(args.out) // 1024))
-    print('%d objetos con precio · %d no cotizan · %d con error'
-          % (len(out['items']), len(untraded), len(failed)))
+    print('\nEscrito %s (%d KB); descarga en %.1f s'
+          % (args.out, os.path.getsize(args.out) // 1024, time.time() - started))
+    print('%d objetos con precio · %d no cotizan (%d ya se sabían) · %d con error'
+          % (len(out['items']), len(untraded), len(skipped), len(failed)))
     flat = sum(1 for m in out['items'].values() if len(m['o']) == 1)
     print('%d con una única combinación de calidad y nivel (precio plano)' % flat)
     for kind, s in out['slopes'].items():
