@@ -67,6 +67,14 @@ main{padding:16px;max-width:1500px;margin:0 auto}
 .chip.dim{opacity:.4;cursor:not-allowed}
 .chip.ro{cursor:default;color:var(--fg)}   /* stat fija: se muestra, no se elige */
 
+/* iconos de estadística: heredan el color del texto que acompañan */
+.sicon{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round;opacity:.82;vertical-align:-4px}
+.chip .sicon{width:15px;height:15px}
+.chip{display:inline-flex;align-items:center;gap:5px}
+.stat .n{display:flex;align-items:center;gap:8px}
+td>.sicon{margin-right:6px}
+
 /* resultados */
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 14px}
 .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
@@ -125,6 +133,57 @@ textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;fon
 </style>
 </head>
 <body>
+<!-- Sprite de iconos de estadísticas. Cada glifo se dibuja en una caja 24×24 centrada en
+     (12,12) y sin grosor de trazo propio, para que se pueda reutilizar a cualquier escala:
+     suelto (acumulaciones), dentro del escudo (protecciones) o dentro del aro (reacciones).
+     Ver STAT_ICON y statIcon() más abajo. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <!-- envoltorios -->
+  <g id="g-shield"><path d="M12 1.8 3.4 5.3v6.5c0 5 3.5 9.4 8.6 11.1 5.1-1.7 8.6-6.1 8.6-11.1V5.3z"/></g>
+  <g id="g-ring"><circle cx="12" cy="12" r="10.4"/></g>
+
+  <!-- glifos de peligro -->
+  <path id="p-radwedge" d="M12 2.4a9.6 9.6 0 0 0-4.8 1.3l3.1 5.3A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 1.7.5l3.1-5.3A9.6 9.6 0 0 0 12 2.4z"/>
+  <g id="g-radiation" fill="currentColor" stroke="none">
+    <circle cx="12" cy="12" r="2.4"/>
+    <use href="#p-radwedge"/><use href="#p-radwedge" transform="rotate(120 12 12)"/><use href="#p-radwedge" transform="rotate(240 12 12)"/>
+  </g>
+  <g id="g-bio">
+    <circle cx="12" cy="12" r="2"/><circle cx="12" cy="6.3" r="3.7"/>
+    <circle cx="7.1" cy="15" r="3.7"/><circle cx="16.9" cy="15" r="3.7"/>
+  </g>
+  <g id="g-flame" fill="currentColor" stroke="none"><path d="M11.2 1.8c.5 3-.5 5-2 6.6-2 2.1-3.8 3.9-3.8 7a6.6 6.6 0 0 0 13.2 0c0-2.7-1.3-4.6-2.8-6.2-.4 1.2-1 2-1.9 2.3.6-3.3-.7-6.6-2.7-9.7z"/></g>
+  <g id="g-frost">
+    <path d="M12 2.8v18.4M4 7.4l16 9.2M20 7.4 4 16.6"/>
+    <path d="M9.4 5.4 12 2.8l2.6 2.6M9.4 18.6 12 21.2l2.6-2.6"/>
+  </g>
+  <g id="g-thermo"><path d="M14.2 14.2V5.6a2.2 2.2 0 0 0-4.4 0v8.6a4.4 4.4 0 1 0 4.4 0z"/><path d="M12 9.2v5.6"/></g>
+  <g id="g-bolt" fill="currentColor" stroke="none"><path d="M13.9 2.2 5.6 13.4a.6.6 0 0 0 .5 1h4.3l-1 7.2a.6.6 0 0 0 1.1.4l8.2-11.2a.6.6 0 0 0-.5-1h-4.3l1-7.2a.6.6 0 0 0-1-.4z"/></g>
+  <g id="g-drop" fill="currentColor" stroke="none"><path d="M12 2.4c3.4 4.3 5.7 7.1 5.7 10a5.7 5.7 0 1 1-11.4 0c0-2.9 2.3-5.7 5.7-10z"/></g>
+  <g id="g-claw"><path d="M4.2 5.4c1.3 5 4.2 9.6 8.4 13.2M9.2 3.4c1.3 5 4.2 9.6 8.4 13.2M14.2 2.6c1.2 4.6 3.7 8.8 7.2 12.1"/></g>
+  <g id="g-flask"><path d="M9.4 2.8v5.4L4.8 17a2.3 2.3 0 0 0 2 3.4h10.4a2.3 2.3 0 0 0 2-3.4l-4.6-8.8V2.8"/><path d="M8.2 2.8h7.6M7.1 13.8h9.8"/></g>
+  <g id="g-psy"><path d="M12 2.8v18.4M5.6 6.4v5a6.4 6.4 0 0 0 12.8 0v-5"/></g>
+  <g id="g-boom" fill="currentColor" stroke="none"><path d="m12 1.8 2.5 4.9 5-1.8-1.8 5 4.9 2.5-4.9 2.5 1.8 5-5-1.8-2.5 4.9-2.5-4.9-5 1.8 1.8-5L1.4 12.4l4.9-2.5-1.8-5 5 1.8z"/></g>
+  <g id="g-bullet"><path d="M12 2.6c1.9 1.8 2.9 3.8 2.9 6.2v9.6a1.8 1.8 0 0 1-1.8 1.8h-2.2a1.8 1.8 0 0 1-1.8-1.8V8.8c0-2.4 1-4.4 2.9-6.2z"/><path d="M9.1 12.6h5.8M9.5 21.4h5"/></g>
+
+  <!-- glifos de cuerpo y equipo -->
+  <g id="g-heart"><path d="M12 20.6S3.4 15.2 3.4 9.3a4.7 4.7 0 0 1 8.6-2.7 4.7 4.7 0 0 1 8.6 2.7c0 5.9-8.6 11.3-8.6 11.3z"/></g>
+  <g id="g-heartpulse"><path d="M12 20.6S3.4 15.2 3.4 9.3a4.7 4.7 0 0 1 8.6-2.7 4.7 4.7 0 0 1 8.6 2.7c0 5.9-8.6 11.3-8.6 11.3z"/><path d="M5.6 11.4h2.6l1.5-2.8 2.2 5 1.5-2.2h3.2"/></g>
+  <g id="g-healcycle"><path d="M12 7.4v9.2M7.4 12h9.2"/><path d="M20.4 12a8.4 8.4 0 1 1-2.5-6"/><path d="M18.4 2.4v3.8h-3.8"/></g>
+  <g id="g-medkit"><rect x="3" y="6" width="18" height="14" rx="2.6"/><path d="M12 9.6v6.8M8.6 13h6.8"/><path d="M8.6 6V4.8A1.8 1.8 0 0 1 10.4 3h3.2a1.8 1.8 0 0 1 1.8 1.8V6"/></g>
+  <g id="g-boltcycle"><path d="M20.4 12a8.4 8.4 0 1 1-2.5-6" /><path d="M18.4 2.4v3.8h-3.8"/><path d="M13 7.6 8.8 13h3.2l-.8 4 4.2-5.4h-3.2z" fill="currentColor" stroke="none"/></g>
+  <g id="g-pack"><path d="M7.4 8.6V6.8a4.6 4.6 0 0 1 9.2 0v1.8"/><rect x="3.6" y="8" width="16.8" height="12.8" rx="3.2"/><path d="M9.4 8v5.4h5.2V8M9.6 17.4h4.8"/></g>
+  <g id="g-speed"><path d="M4.6 12h12.2"/><path d="m13.4 8 4 4-4 4"/><path d="M3 7.4h5.6M3 16.6h5.6"/></g>
+  <g id="g-sprint"><path d="m9.6 6.6 5.4 5.4-5.4 5.4M15.4 6.6 20.8 12l-5.4 5.4"/><path d="M2.6 7.4h5M2.6 12h4M2.6 16.6h5"/></g>
+  <g id="g-recoil"><path d="M4.6 20.4h14.8"/><path d="M12 17.6V5.4"/><path d="m8.2 9.2 3.8-3.8 3.8 3.8"/><path d="M6.6 14.4a7.4 7.4 0 0 1 1.6-3M17.4 14.4a7.4 7.4 0 0 0-1.6-3"/></g>
+  <g id="g-wave"><path d="M2.6 14.4c1.6-5 3.6-5 5.2 0s3.6 5 5.2 0 3.6-5 5.2 0c.4 1.2.9 1.9 1.4 2.2"/><path d="M12 3.4v2.8M9.2 4.6l1.4 2.4M14.8 4.6l-1.4 2.4"/></g>
+  <g id="g-cross"><circle cx="12" cy="12" r="7.6"/><path d="M12 2.6v4.2M12 17.2v4.2M2.6 12h4.2M17.2 12h4.2"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></g>
+  <g id="g-battery"><rect x="2.4" y="5.4" width="15.8" height="13.2" rx="2.6"/><path d="M21.4 9.4v5.2"/><path d="m11.8 7-3.6 5.6h3.4l-.8 4.4 4.6-6h-3.4z" fill="currentColor" stroke="none"/></g>
+  <g id="g-cycle"><path d="M20.4 12a8.4 8.4 0 1 1-2.5-6"/><path d="M18.4 2.4v3.8h-3.8"/><path d="M12 7.8V12l2.8 1.8"/></g>
+  <g id="g-impact"><path d="M12 2.6v9.6"/><path d="m8 8.4 4 4 4-4"/><path d="M4.4 15.8h15.2"/><path d="m6.6 20.6 1.6-3.2M12 21.2v-3.4M17.4 20.6l-1.6-3.2"/></g>
+  <g id="g-down"><path d="M12 4.6v13.2"/><path d="m6.8 12.4 5.2 5.4 5.2-5.4"/></g>
+  <g id="g-dot"><circle cx="12" cy="12" r="6.4"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></g>
+</defs></svg>
 <header>
   <h1>STAL<span>ZONE</span> · Calculadora de builds</h1>
   <span id="market-tag" class="hidden" title=""></span>
@@ -523,6 +582,90 @@ const D = window.SZ_DATA;
 const byId = (arr) => Object.fromEntries(arr.map(x => [x.i, x]));
 const ART = byId(D.artefacts), CNT = byId(D.containers), ARM = byId(D.armors);
 const statName = k => (D.statNames[k] && D.statNames[k].es) || k;
+
+/* -------------------------------------------------------------------------
+   ICONOS DE ESTADÍSTICA
+   Cada stat es [glifo, envoltorio]. El envoltorio codifica de un vistazo qué
+   clase de stat es, así que un peligro y su protección comparten glifo:
+     ''       lo que se acumula o se tiene (Radiación, Vitalidad…)
+     'shield' lo que protege de ello       (Protección contra radiación)
+     'ring'   una reacción a anomalía      (Reacción a la electricidad)
+   ------------------------------------------------------------------------- */
+const STAT_ICON = {
+  // cuerpo
+  health_bonus:               ['heart'],
+  regeneration_bonus:         ['heartpulse'],
+  stamina_bonus:              ['bolt'],
+  stamina_regeneration_bonus: ['boltcycle'],
+  max_weight_bonus:           ['pack'],
+  speed_modifier:             ['speed'],
+  sprint_speed_modifier:      ['sprint'],
+  heal_efficiency:            ['medkit'],
+  artefakt_heal:              ['healcycle'],
+  // acumulaciones
+  radiation_accumulation:     ['radiation'],
+  thermal_accumulation:       ['thermo'],
+  frost_accumulation:         ['frost'],
+  combustion_accumulation:    ['flame'],
+  biological_accumulation:    ['bio'],
+  psycho_accumulation:        ['psy'],
+  bleeding_accumulation:      ['drop'],
+  // protecciones
+  radiation_protection:       ['radiation', 'shield'],
+  thermal_protection:         ['thermo',    'shield'],
+  frost_protection:           ['frost',     'shield'],
+  burn_dmg_factor:            ['flame',     'shield'],
+  biological_protection:      ['bio',       'shield'],
+  psycho_protection:          ['psy',     'shield'],
+  bleeding_protection:        ['drop',      'shield'],
+  bullet_dmg_factor:          ['bullet',    'shield'],
+  explosion_dmg_factor:       ['boom',      'shield'],
+  tear_dmg_factor:            ['claw',      'shield'],
+  chemical_burn_dmg_factor:   ['flask',     'shield'],
+  electra_dmg_factor:         ['bolt',      'shield'],
+  blocking_damage:            ['down',      'shield'],
+  // reacciones a anomalías
+  reaction_to_electroshock:   ['bolt',   'ring'],
+  reaction_to_tear:           ['claw',   'ring'],
+  reaction_to_chemical_burn:  ['flask',  'ring'],
+  reaction_to_burn:           ['flame',  'ring'],
+  // armas y activación
+  recoil_bonus:               ['recoil'],
+  wiggle_bonus:               ['wave'],
+  stopping_protection:        ['cross'],
+  trigger_damage:             ['impact'],
+  recharge:                   ['cycle'],
+  cost:                       ['battery'],
+  // objetivos sintéticos del optimizador, que no salen de D.statNames
+  __eh:                       ['heart', 'shield'],
+  __hps:                      ['healcycle'],
+};
+const SVGNS = 'http://www.w3.org/2000/svg';
+const svgUse = (id, attrs = {}) => {
+  const u = document.createElementNS(SVGNS, 'use');
+  u.setAttribute('href', '#g-' + id);
+  for (const k in attrs) u.setAttribute(k, attrs[k]);
+  return u;
+};
+/** Icono de una stat, dimensionado en «em» para que siga al texto que acompaña. */
+function statIcon(k){
+  const [glyph, wrap] = STAT_ICON[k] || ['dot'];
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'sicon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  if (!wrap) { svg.append(svgUse(glyph)); return svg; }
+  // Dentro del escudo o del aro el glifo se encoge, así que hay que engordarle el trazo
+  // en la misma proporción para que no se quede en un hilo.
+  const sc = wrap === 'shield' ? .56 : .58, cy = wrap === 'shield' ? 11.6 : 12;
+  svg.append(svgUse(wrap), svgUse(glyph, {
+    transform: `translate(12 ${cy}) scale(${sc}) translate(-12 -12)`,
+    'stroke-width': (1.7 / sc).toFixed(2),
+  }));
+  return svg;
+}
+/** «[icono] Vitalidad» como par de nodos, listo para meter en cualquier contenedor. */
+const statNameNodes = k => [statIcon(k), statName(k)];
 const CAT_ES = {biochemical:'Bioquímico', electrophysical:'Electrofísico', gravity:'Gravitacional',
   thermal:'Térmico', other_arts:'Otros', armor:'Armadura', clothes:'Ropa', combat:'Combate',
   combined:'Combinada', scientist:'Científica', styles:'Estilo'};
@@ -635,8 +778,9 @@ const el = (tag, props = {}, ...kids) => {
    MODAL SELECTOR
    ========================================================================= */
 /**
- * @param detail [[rótulo, [etiquetas…]], …] que se pliega tras una flecha, para no cargar la
- *               lista con lo que sólo se mira de vez en cuando. Se busca también aquí dentro.
+ * @param detail [[rótulo, [[stat, etiqueta], …]], …] que se pliega tras una flecha, para no
+ *               cargar la lista con lo que sólo se mira de vez en cuando. La clave de la stat
+ *               sólo sirve para ponerle icono; se busca por la etiqueta.
  */
 function openPicker({title, items, meta, detail, onPick}){
   const host = $('#modal-host');
@@ -650,7 +794,7 @@ function openPicker({title, items, meta, detail, onPick}){
   const render = () => {
     const q = input.value.trim().toLowerCase();
     // Se busca también en el detalle plegado: si ahí dentro pone «radiación», debe encontrarse.
-    const hay = it => `${it.n.es} ${it.n.en} ${CAT_ES[it.c] || ''} ${detailOf(it).map(([, xs]) => xs.join(' ')).join(' ')}`;
+    const hay = it => `${it.n.es} ${it.n.en} ${CAT_ES[it.c] || ''} ${detailOf(it).map(([, xs]) => xs.map(x => x[1]).join(' ')).join(' ')}`;
     const rows = items.filter(it => !q || hay(it).toLowerCase().includes(q));
     list.replaceChildren(...rows.map(it => {
       const img = el('img', {src: ICON(it), alt: '', loading: 'lazy'});
@@ -667,7 +811,7 @@ function openPicker({title, items, meta, detail, onPick}){
         const panel = el('div', {className:'det hidden'});
         for (const [rotulo, etiquetas] of det)
           panel.append(el('div', {className:'note', textContent: rotulo}),
-            el('div', {className:'chips'}, ...etiquetas.map(t => el('div', {className:'chip ro', textContent:t}))));
+            el('div', {className:'chips'}, ...etiquetas.map(([k, t]) => el('div', {className:'chip ro'}, statIcon(k), t))));
         const exp = el('button', {className:'exp', textContent:'⌄', title:'Ver estadísticas'});
         exp.onclick = e => {
           e.stopPropagation();                       // mirar las stats no debe elegir el item
@@ -777,11 +921,12 @@ function renderArtefacts(){
       // deslizadores; se llenan más abajo, cuando se crean.
       const live = [];
       const chip = (st, cls) => {
-        const c = el('div', {className: cls, textContent: statLabel(st, cfg.level, cfg.quality)});
-        live.push([c, st]);
+        const t = document.createTextNode(statLabel(st, cfg.level, cfg.quality));
+        const c = el('div', {className: cls}, statIcon(st[0]), t);
+        live.push([t, st]);
         return c;
       };
-      const paintChips = () => { for (const [c, st] of live) c.textContent = statLabel(st, cfg.level, cfg.quality); };
+      const paintChips = () => { for (const [t, st] of live) t.nodeValue = statLabel(st, cfg.level, cfg.quality); };
       body.append(sliderRow('Nivel', cfg.level, 0, 15, 1, (v, commit) => {
         const prev = ENGINE.addSlots(cfg.id, cfg.level);
         cfg.level = v; syncAddSel(cfg, prev);
@@ -873,8 +1018,8 @@ function pickArtefact(i){
     title:'Elegir artefacto', items: D.artefacts,
     // Qué da cada uno, con los valores del nivel y la calidad del hueco que se está llenando.
     detail: it => [
-      [`Estadísticas base · +${lvl} · ${qual}%`, it.s.map(st => statLabel(st, lvl, qual))],
-      ['Adicionales (se desbloquean con el nivel)', it.a.map(st => statLabel(st, lvl, qual))],
+      [`Estadísticas base · +${lvl} · ${qual}%`, it.s.map(st => [st[0], statLabel(st, lvl, qual)])],
+      ['Adicionales (se desbloquean con el nivel)', it.a.map(st => [st[0], statLabel(st, lvl, qual)])],
     ],
     meta: it => {
       const e = PRICES.has() ? PRICES.estimate(it.i, lvl, qual) : null;
@@ -901,7 +1046,7 @@ function renderReactions(result){
   const chips = el('div', {className:'chips'});
   for (const k of avail){
     const on = state.reactions.includes(k);
-    const c = el('div', {className:'chip' + (on ? ' on' : ''), textContent: statName(k)});
+    const c = el('div', {className:'chip' + (on ? ' on' : '')}, ...statNameNodes(k));
     c.onclick = () => {
       state.reactions = on ? state.reactions.filter(x => x !== k) : [...state.reactions, k];
       refresh();
@@ -941,7 +1086,8 @@ function renderResults(r){
   host.append(kpis);
 
   for (const key of r.alerts){
-    host.append(el('div', {className:'alert', textContent:`⚠ ${statName(key)} supera el umbral de ${ENGINE.LIMITS[key]} — sufrirás daño continuo.`}));
+    host.append(el('div', {className:'alert'}, statIcon(key),
+      ` ${statName(key)} supera el umbral de ${ENGINE.LIMITS[key]} — sufrirás daño continuo.`));
   }
 
   const all = r.stats.concat(r.poly);
@@ -956,7 +1102,7 @@ function renderResults(r){
     host.append(el('div', {className:'cat', textContent: ENGINE.CATEGORY_LABEL[cat]}));
     for (const s of rows){
       host.append(el('div', {className:'stat'},
-        el('span', {className:'n', textContent: statName(s.key)}),
+        el('span', {className:'n'}, ...statNameNodes(s.key)),
         el('span', {className:'v', textContent: fmt(s.value, s.pct), style:`color:${s.positive ? 'var(--pos)' : 'var(--neg)'}`})));
     }
   }
@@ -1531,7 +1677,7 @@ function renderOptGoals(){
   for (const g of optState.goals){
     const label = (GOALS.find(x => x.id === g.id) || {label: g.id}).label;
     const row = el('div', {className:'ctl', style:'grid-template-columns:1fr 90px 32px;margin-bottom:6px'});
-    row.append(el('label', {textContent: label}));
+    row.append(el('label', {}, statIcon(g.id), ` ${label}`));
     if (multi){
       const w = el('input', {type:'number', min:'0', max:'100', step:'5', value: g.weight});
       w.oninput = () => { g.weight = Math.max(0, Math.min(100, +w.value || 0)); syncGoalNote(); };
@@ -1599,7 +1745,7 @@ function renderOptResult(best, parts, cfg){
       const pct = p.top === null || !(p.scale > 0) ? null
         : (min0(p.id, v) - p.base) / p.scale * 100;
       t.append(el('tr', {},
-        el('td', {textContent: labelOf(p.id)}),
+        el('td', {}, statIcon(p.id), labelOf(p.id)),
         el('td', {textContent: Math.round(p.weight / pesoTotal * 100) + ' %'}),
         el('td', {textContent: v.toFixed(2)}),
         el('td', {textContent: pct === null ? '—' : `${pct.toFixed(0)} % de ${p.top.toFixed(2)}`})));
@@ -1673,9 +1819,9 @@ function renderOptResult(best, parts, cfg){
   const r = best.res;
   const tbl = el('table');
   tbl.append(el('tr', {}, el('th', {textContent:'Estadística'}), el('th', {textContent:'Valor'})));
-  tbl.append(el('tr', {}, el('td', {textContent:'Salud efectiva'}), el('td', {textContent: r.effectiveHealth.toFixed(2)})));
+  tbl.append(el('tr', {}, el('td', {}, statIcon('__eh'), 'Salud efectiva'), el('td', {textContent: r.effectiveHealth.toFixed(2)})));
   for (const s of r.stats){
-    tbl.append(el('tr', {}, el('td', {textContent: statName(s.key)}),
+    tbl.append(el('tr', {}, el('td', {}, statIcon(s.key), statName(s.key)),
       el('td', {textContent: fmt(s.value, s.pct), style:`color:${s.positive ? 'var(--pos)' : 'var(--neg)'}`})));
   }
   host.append(el('div', {className:'scroll'}, tbl));
@@ -1753,17 +1899,17 @@ function renderCompare(){
 
   const tbl = el('table');
   tbl.append(el('tr', {}, el('th', {textContent:'Estadística'}), ...results.map(x => el('th', {textContent: x.name}))));
-  const addRow = (label, vals, fmtFn) => {
+  const addRow = (label, vals, fmtFn, icon) => {
     const top = Math.max(...vals);
     const uniq = new Set(vals).size > 1;
-    tbl.append(el('tr', {}, el('td', {textContent: label}), ...vals.map(v => {
+    tbl.append(el('tr', {}, el('td', {}, ...(icon ? [statIcon(icon)] : []), label), ...vals.map(v => {
       const td = el('td', {textContent: fmtFn(v)});
       if (uniq && v === top) td.style.color = 'var(--acc)';
       return td;
     })));
   };
-  addRow('Salud efectiva', results.map(x => x.r.effectiveHealth), v => v.toFixed(2));
-  addRow('Curación / s', results.map(x => x.r.healingPerSecond), v => v.toFixed(2) + '%');
+  addRow('Salud efectiva', results.map(x => x.r.effectiveHealth), v => v.toFixed(2), '__eh');
+  addRow('Curación / s', results.map(x => x.r.healingPerSecond), v => v.toFixed(2) + '%', '__hps');
   if (PRICES.has()){
     // En el coste lo deseable es lo bajo, así que se resalta el mínimo (la fila normal
     // resalta el máximo) usando el signo cambiado.
@@ -1775,7 +1921,7 @@ function renderCompare(){
     const nums = cells.map(c => c ? c.value : 0);
     const isMin = ENGINE.CAN_BOTH.includes(k);
     const bestVal = isMin ? Math.min(...nums) : Math.max(...nums);
-    const tr = el('tr', {}, el('td', {textContent: statName(k)}));
+    const tr = el('tr', {}, el('td', {}, statIcon(k), statName(k)));
     cells.forEach((c, i) => {
       const td = el('td', {textContent: c ? fmt(c.value, c.pct) : '—'});
       if (c && nums[i] === bestVal && new Set(nums).size > 1) td.style.color = 'var(--acc)';
@@ -1854,7 +2000,7 @@ function init(){
   const lr = $('#o-limit-rows');
   for (const k in ENGINE.LIMITS){
     const row = el('div', {className:'ctl', style:'grid-template-columns:1fr 90px'});
-    row.append(el('label', {textContent: statName(k) + ' ≤'}),
+    row.append(el('label', {}, statIcon(k), ` ${statName(k)} ≤`),
       el('input', {type:'number', id:'lim-' + k, step:'0.1', value: ENGINE.LIMITS[k]}));
     lr.append(row);
   }
