@@ -122,6 +122,17 @@ th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6p
 
 /* precios de mercado */
 #market-tag{font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:3px 10px;cursor:default}
+/* precios de hace más de un día: la instantánea ya no va con el mercado */
+#market-tag.stale{color:var(--warn);border-color:var(--warn)}
+#market-sync{font-size:11.5px;padding:3px 10px;border-radius:99px}
+#market-sync.stale{color:var(--warn);border-color:var(--warn)}
+#market-sync.stale:hover:not(:disabled){background:#2a2213;border-color:var(--warn)}
+.modal .box.sm{height:auto;max-height:86vh;width:min(560px,100%)}
+.modal .box.sm .pad{overflow:auto}
+.cmd{display:flex;gap:8px;align-items:center;margin:10px 0}
+.cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:12.5px}
+.log{background:#0a0c0b;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:11.5px;line-height:1.5;
+  max-height:230px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
 .price{font-variant-numeric:tabular-nums;color:var(--gold)}
 .price.est{color:var(--muted)}
 .price.est::after{content:'~';font-size:.85em;vertical-align:super;margin-left:1px}

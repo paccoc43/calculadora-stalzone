@@ -61,6 +61,7 @@
 <header>
   <h1>STAL<span>ZONE</span> · Calculadora de builds</h1>
   <span id="market-tag" class="hidden" title=""></span>
+  <button id="market-sync" class="hidden">Actualizar precios</button>
   <div class="tabs">
     <button id="tab-calc" class="on" data-tab="calc">Calculadora</button>
     <button id="tab-opt" data-tab="opt">Optimizador</button>
@@ -611,6 +612,153 @@ function pickArtefact(i){
       refresh();
     }
   });
+}
+
+/* =========================================================================
+   PRECIOS DE MERCADO — antigüedad de la instantánea y botón de actualizar
+   ========================================================================= */
+
+const DIA = 86400000;
+/** Comando que hay que ejecutar para regenerar data/prices.js. */
+const syncCommand = () => 'python tools/gen_prices.py'
+  + (PRICES.region ? ` --region ${PRICES.region.toLowerCase()}` : '');
+
+/** Días transcurridos desde que se generó la instantánea, o null si no hay precios. */
+function priceAge(){
+  const t = PRICES.generated ? Date.parse(PRICES.generated) : NaN;
+  return isNaN(t) ? null : (Date.now() - t) / DIA;
+}
+
+function edadTexto(dias){
+  if (dias < 1) return 'de hoy';
+  const d = Math.floor(dias);
+  return d === 1 ? 'de hace un día' : `de hace ${d} días`;
+}
+
+/**
+ * Pinta la etiqueta de mercado y su botón. Pasado un día la instantánea deja de ir con el
+ * mercado —los precios de subasta se mueven a diario—, así que ambos se ponen en ámbar.
+ */
+function renderMarketTag(){
+  const tag = $('#market-tag'), btn = $('#market-sync');
+  tag.classList.remove('hidden');
+  btn.classList.remove('hidden');
+  btn.onclick = openSyncDialog;
+  if (!PRICES.has()){
+    tag.textContent = 'Sin precios de mercado';
+    tag.title = 'No hay data/prices.js. Genéralo para ver costes y optimizar con presupuesto.';
+    tag.classList.add('stale');
+    btn.classList.add('stale');
+    btn.textContent = 'Obtener precios';
+    return;
+  }
+  const dias = priceAge();
+  const vieja = dias !== null && dias >= 1;
+  tag.textContent = `Mercado ${PRICES.region}${PRICES.demo ? ' · DEMO' : ''} · ${PRICES.generated.slice(0, 10)}`;
+  tag.classList.toggle('stale', vieja);
+  btn.classList.toggle('stale', vieja);
+  tag.title = PRICES.demo
+    ? 'Instantánea generada contra la API de demostración: los precios son ficticios.'
+    : `Instantánea del historial de subasta ${dias === null ? '' : edadTexto(dias)}.`
+      + (vieja ? ' La subasta se mueve a diario: conviene actualizarla.' : '');
+  btn.title = vieja
+    ? `Los precios son ${edadTexto(dias)} y puede que ya no vayan con el mercado.`
+    : 'Vuelve a descargar el historial de subasta.';
+}
+
+/** ¿Está la página servida por tools/serve.py, que sí puede ejecutar el generador? */
+async function syncServer(){
+  if (location.protocol === 'file:') return null;
+  try {
+    const r = await fetch('api/prices/status', {headers: {'X-Calculadora': '1'}});
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+function openSyncDialog(){
+  const host = $('#modal-host');
+  const body = el('div', {className:'pad'});
+  const close = () => host.replaceChildren();
+  const cerrar = el('button', {textContent:'Cerrar'});
+  cerrar.onclick = close;
+  const box = el('div', {className:'box sm'},
+    el('h3', {}, el('span', {textContent:'Precios de mercado'}), cerrar), body);
+  const wrap = el('div', {className:'modal'}, box);
+  wrap.onclick = e => { if (e.target === wrap) close(); };
+  host.replaceChildren(wrap);
+
+  const dias = priceAge();
+  body.append(el('p', {className:'note', style:'margin-top:0', textContent:
+    PRICES.has()
+      ? `La instantánea actual es ${edadTexto(dias)} (${PRICES.generated.slice(0, 10)}, región ${PRICES.region}).`
+      : 'Todavía no hay ninguna instantánea de precios.'}));
+
+  const estado = el('p', {className:'note', textContent:'Comprobando…'});
+  body.append(estado);
+  syncServer().then(srv => srv ? modoServidor(body, estado, close) : modoManual(body, estado));
+}
+
+/** Sin servidor detrás sólo se puede enseñar el comando: la página no ejecuta nada. */
+function modoManual(body, estado){
+  estado.textContent = 'Esta página está abierta como fichero, así que no puede ejecutar el'
+    + ' generador. Lánzalo desde la raíz del repositorio:';
+  const cmd = el('code', {textContent: syncCommand()});
+  const copiar = el('button', {textContent:'Copiar'});
+  copiar.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(syncCommand());
+      copiar.textContent = 'Copiado';
+    } catch { copiar.textContent = 'Cópialo a mano'; }
+  };
+  body.append(el('div', {className:'cmd'}, cmd, copiar),
+    el('p', {className:'note', textContent:
+      'Para tener el botón funcionando, abre la calculadora con «python tools/serve.py»'
+      + ' en vez de con doble clic.'}));
+}
+
+/** Con serve.py delante el botón sí actualiza: se lanza y se va enseñando el progreso. */
+function modoServidor(body, estado, close){
+  estado.textContent = 'Se descargará el historial de subasta y se regenerará data/prices.js.';
+  const log = el('div', {className:'log hidden'});
+  const lanzar = el('button', {className:'primary', textContent:'Actualizar ahora'});
+  const fila = el('div', {className:'row', style:'margin:10px 0'}, lanzar);
+  body.append(fila, log);
+
+  const pedir = (metodo) => fetch('api/prices/refresh',
+    {method: metodo, headers: {'X-Calculadora': '1'}}).then(r => r.json());
+
+  const pintar = st => {
+    log.classList.remove('hidden');
+    log.textContent = st.lines.slice(-14).join('\n') || 'Arrancando…';
+    log.scrollTop = log.scrollHeight;
+  };
+
+  lanzar.onclick = async () => {
+    lanzar.disabled = true;
+    lanzar.textContent = 'Actualizando…';
+    try {
+      pintar(await pedir('POST'));
+      // El generador tarda lo suyo, así que se va preguntando cómo va en vez de esperar.
+      while (true){
+        await new Promise(r => setTimeout(r, 800));
+        const st = await pedir('GET');
+        pintar(st);
+        if (!st.done) continue;
+        estado.textContent = st.ok
+          ? `Listo en ${st.elapsed} s. ${st.summary}`
+          : `No se pudo actualizar. ${st.summary}`;
+        if (!st.ok){ lanzar.disabled = false; lanzar.textContent = 'Reintentar'; return; }
+        // Los precios nuevos están en disco: sólo se ven volviendo a cargar la página.
+        lanzar.textContent = 'Recargando…';
+        setTimeout(() => location.reload(), 900);
+        return;
+      }
+    } catch (e){
+      estado.textContent = 'Se perdió la conexión con el servidor: ' + e.message;
+      lanzar.disabled = false;
+      lanzar.textContent = 'Reintentar';
+    }
+  };
 }
 
 function renderResults(r){
@@ -1225,13 +1373,8 @@ function init(){
   renderOptGoals();
 
   // Precios de mercado (sólo si existe data/prices.js)
+  renderMarketTag();
   if (PRICES.has()){
-    const tag = $('#market-tag');
-    tag.classList.remove('hidden');
-    tag.textContent = `Mercado ${PRICES.region}${PRICES.demo ? ' · DEMO' : ''} · ${PRICES.generated.slice(0, 10)}`;
-    tag.title = PRICES.demo
-      ? 'Instantánea generada contra la API de demostración: los precios son ficticios.'
-      : `Instantánea del historial de subasta. Regenérala con tools/gen_prices.py --region ${PRICES.region.toLowerCase()}`;
     $('#o-budget-wrap').classList.remove('hidden');
     // Mezclar grados sólo tiene sentido con precios: es un intercambio entre potencia y dinero.
     $('#o-mix-wrap').classList.remove('hidden');

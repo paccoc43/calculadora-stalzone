@@ -6,7 +6,8 @@ artefactos para un objetivo concreto, un **comparador** de builds y **guardado/c
 Si se generan los precios de subasta, muestra además **cuánto cuesta la build** y permite
 optimizar con presupuesto.
 
-No necesita instalación: abre `index.html` en el navegador.
+No necesita instalación: abre `index.html` en el navegador. Si además quieres el botón de
+**Actualizar precios**, ábrela con `python tools/serve.py`.
 
 ```
 index.html          Marcado de la interfaz, iconos y toda la lógica que toca el DOM
@@ -18,6 +19,7 @@ data/gamedata.js    Catálogo: 106 artefactos, 56 contenedores, 137 armaduras
 data/prices.js      Precios de subasta (opcional, se genera aparte)
 tools/gen_data.py   Regenera el catálogo desde la API de stalzone.wiki
 tools/gen_prices.py Regenera los precios desde la API oficial de STALZONE
+tools/serve.py      Sirve la calculadora y da el botón de «Actualizar precios»
 tools/test_*.js     Pruebas del motor, del optimizador y de los precios (Node)
 ```
 
@@ -177,6 +179,26 @@ cp .env.example .env      # y rellena tus credenciales dentro
 python tools/gen_prices.py                    # usa la región de .env
 python tools/gen_prices.py --region eu        # ru | eu | na | sea
 ```
+
+### El botón de actualizar
+
+La cabecera muestra de cuándo es la instantánea, y **en ámbar** cuando tiene más de un día: la
+subasta se mueve a diario, así que a partir de ahí los precios ya no van con el mercado. Al lado
+hay un botón que la regenera.
+
+Como la calculadora es una página estática, el botón necesita a alguien que ejecute el generador
+—y las credenciales de la API no pueden acabar en el navegador—, así que se sirve con:
+
+```bash
+python tools/serve.py                 # abre http://127.0.0.1:8000
+python tools/serve.py --port 9000
+python tools/serve.py --demo          # el botón usará la API de demostración
+```
+
+Sólo escucha en 127.0.0.1 y no acepta ningún parámetro del navegador: qué se ejecuta se decide en
+los argumentos de arranque. El botón lanza `gen_prices.py`, enseña su progreso en vivo y recarga la
+página al terminar. Abriendo `index.html` con doble clic todo lo demás funciona igual; el botón
+detecta que no hay servidor detrás y muestra el comando para copiar.
 
 La descarga va en paralelo (`--workers`, 8 hilos por defecto) sobre una conexión persistente
 por hilo, con un ritmo compartido de una petición cada `--delay` segundos (0,2 por defecto) que
