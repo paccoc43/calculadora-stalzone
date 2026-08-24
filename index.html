@@ -100,16 +100,6 @@
           <h2>Artefactos <span class="tag" id="art-tag"></span></h2>
           <div class="pad" id="art-slots"></div>
         </div>
-
-        <div class="panel">
-          <h2>Estado del personaje</h2>
-          <div class="pad">
-            <div class="ctl"><label>Nivel de hemorragia</label><input type="range" id="bleed" min="0" max="4" step="1" value="0"><input type="number" id="bleed-n" min="0" max="4" value="0"></div>
-            <div class="row" style="margin-top:4px"><label style="cursor:pointer"><input type="checkbox" id="burning"> En llamas (quemándose)</label></div>
-            <p class="note" style="margin:8px 0 0">Reducen la regeneración y la eficacia de curación, igual que en el juego.</p>
-            <div id="reactions-wrap" style="margin-top:10px"></div>
-          </div>
-        </div>
       </div>
 
       <div>
@@ -127,7 +117,7 @@
       <div class="panel">
         <h2>Parámetros de búsqueda</h2>
         <div class="pad">
-          <p class="note" style="margin-top:0">Busca la combinación de artefactos que maximiza el objetivo sin superar los límites de acumulación. La armadura y el estado del personaje son los de la pestaña <b>Calculadora</b>.</p>
+          <p class="note" style="margin-top:0">Busca la combinación de artefactos que maximiza el objetivo sin superar los límites de acumulación. La armadura es la de la pestaña <b>Calculadora</b>.</p>
           <label>Mochila / Contenedor</label>
           <button class="slot" id="o-pick-container"><span class="ph">+</span><span class="nm">Selecciona una mochila…</span></button>
           <label style="margin-top:10px">Objetivos a maximizar</label>
@@ -333,7 +323,6 @@ const RARITY_COLOR = q => q >= 175.01 ? 'var(--r-unique)' : q >= 160.01 ? 'var(-
 const state = {
   containerId: null, armorId: null, armorLevel: 15,
   artefacts: [],          // [{id, level, quality, addSel:[índices]}]
-  bleeding: 0, burning: false, reactions: [],
 };
 
 const capacity = () => state.containerId ? CNT[state.containerId].cap : 0;
@@ -345,7 +334,6 @@ function buildObject(st = state){
     container: cont,
     armor: st.armorId ? {item: ARM[st.armorId], level: st.armorLevel} : null,
     artefacts: st.artefacts.slice(0, cap).map(a => a && a.id ? {item: ART[a.id], level: a.level, quality: a.quality, addSel: a.addSel} : null).filter(Boolean),
-    bleeding: st.bleeding, burning: st.burning, reactions: st.reactions,
   };
 }
 
@@ -625,25 +613,6 @@ function pickArtefact(i){
   });
 }
 
-function renderReactions(result){
-  const host = $('#reactions-wrap');
-  host.replaceChildren();
-  const avail = result.availableReactions;
-  if (!avail.length) return;
-  host.append(el('label', {textContent:'Reacciones a anomalías activas (suman a Vitalidad y Regeneración de aguante)'}));
-  const chips = el('div', {className:'chips'});
-  for (const k of avail){
-    const on = state.reactions.includes(k);
-    const c = el('div', {className:'chip' + (on ? ' on' : '')}, ...statNameNodes(k));
-    c.onclick = () => {
-      state.reactions = on ? state.reactions.filter(x => x !== k) : [...state.reactions, k];
-      refresh();
-    };
-    chips.append(c);
-  }
-  host.append(chips);
-}
-
 function renderResults(r){
   const host = $('#results');
   host.replaceChildren();
@@ -703,9 +672,6 @@ let lastResult = null;
 /** Recálculo ligero: sólo el panel de resultados. No recrea los controles. */
 function recalc(){
   lastResult = ENGINE.compute(buildObject());
-  const before = state.reactions.length;
-  state.reactions = state.reactions.filter(k => lastResult.availableReactions.includes(k));
-  if (state.reactions.length !== before) lastResult = ENGINE.compute(buildObject());
   renderResults(lastResult);
   updateCode();
   return lastResult;
@@ -715,9 +681,6 @@ function recalc(){
 function refresh(){
   renderContainer(); renderArmor(); renderArtefacts();
   recalc();
-  renderReactions(lastResult);
-  $('#bleed').value = $('#bleed-n').value = state.bleeding;
-  $('#burning').checked = state.burning;
   $('#armor-lvl').value = $('#armor-lvl-n').value = state.armorLevel;
 }
 
@@ -780,7 +743,6 @@ async function runOptimizer(){
     allowDup: $('#o-dup').checked,
     maxCand: Math.max(6, Math.min(106, +$('#o-cand').value || 34)),
     timeLimit,
-    bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
     isAborted: () => optAbort,
   };
   const progress = (label) => async (nodes, elapsed) => {
@@ -798,8 +760,7 @@ async function runOptimizer(){
    * un reparto 50/50 equilibra de verdad en vez de dejar mandar a la estadística con los
    * números más grandes.
    */
-  const empty = ENGINE.compute({container: cont, armor, artefacts: [],
-    bleeding: state.bleeding, burning: state.burning, reactions: state.reactions});
+  const empty = ENGINE.compute({container: cont, armor, artefacts: []});
   const parts = [];
   for (const [n, g] of chosen.entries()){
     const base = goalValue(g.id, empty);
@@ -845,7 +806,6 @@ async function runOptimizer(){
         return {item: it, level: pk.level, quality: pk.quality,
                 addSel: it.a.map((_, k) => k).slice(0, ENGINE.addSlots(it.i, pk.level))};
       }),
-      bleeding: state.bleeding, burning: state.burning, reactions: state.reactions,
     });
   }
   renderOptResult(r.best || {set: null}, parts, {level, quality, perCost, budget, container: cont});
@@ -1046,15 +1006,13 @@ const decode = c => JSON.parse(decodeURIComponent(escape(atob(c.replace(/-/g,'+'
 
 function snapshot(){
   return {c: state.containerId, a: state.armorId, al: state.armorLevel,
-          ar: state.artefacts.map(x => x && x.id ? [x.id, x.level, x.quality, x.addSel] : null),
-          b: state.bleeding, bu: state.burning, r: state.reactions};
+          ar: state.artefacts.map(x => x && x.id ? [x.id, x.level, x.quality, x.addSel] : null)};
 }
 function restore(s){
   state.containerId = s.c && CNT[s.c] ? s.c : null;
   state.armorId = s.a && ARM[s.a] ? s.a : null;
   state.armorLevel = s.al ?? 15;
   state.artefacts = (s.ar || []).map(x => x && ART[x[0]] ? {id:x[0], level:x[1], quality:x[2], addSel:x[3] || []} : null);
-  state.bleeding = s.b || 0; state.burning = !!s.bu; state.reactions = s.r || [];
 }
 
 function updateCode(){
@@ -1178,13 +1136,8 @@ function init(){
     recalc();
   };
   $('#armor-lvl-n').onchange = e => { state.armorLevel = Math.max(0, Math.min(15, +e.target.value || 0)); refresh(); };
-  $('#bleed').oninput = e => { state.bleeding = +e.target.value; $('#bleed-n').value = state.bleeding; recalc(); };
-  $('#bleed').onchange = () => refresh();
-  $('#bleed-n').onchange = e => { state.bleeding = Math.max(0, Math.min(4, +e.target.value || 0)); refresh(); };
-  $('#burning').onchange = e => { state.burning = e.target.checked; refresh(); };
   $('#btn-reset').onclick = () => {
     state.artefacts = state.artefacts.map(() => null);
-    state.reactions = []; state.bleeding = 0; state.burning = false;
     refresh();
   };
 

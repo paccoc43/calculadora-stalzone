@@ -78,11 +78,6 @@ Curación por segundo = (regeneración + 2,5)/5 + curación periódica × (1 + e
 Estabilidad         = (1 − 100/(100 + prot. laceración) × (1 − estabilidad/100)) × 100
 ```
 
-### Estado del personaje
-
-La hemorragia (niveles 0–4) y las quemaduras restan a la regeneración y a la eficacia de curación.
-Las **reacciones a anomalías** activas suman su valor a la vitalidad y a la regeneración de aguante.
-
 ### Umbrales de daño
 
 La calculadora avisa cuando una acumulación supera su límite: **0,5** para radiación, infección
@@ -93,7 +88,7 @@ biológica, emisiones psy y temperatura, y **1,0** para la congelación.
 Elige una o varias estadísticas a maximizar y busca la combinación de artefactos que las consigue
 sin superar los límites de acumulación. La **mochila se elige en el propio optimizador** (arranca
 con la de la pestaña *Calculadora* y a partir de ahí va por libre; al aplicar la build se lleva
-también a la Calculadora). La armadura y el estado del personaje sí son los de la *Calculadora*.
+también a la Calculadora). La armadura sí es la de la *Calculadora*.
 
 Es un **branch & bound** exacto: representa la build como un vector de contribuciones y acota cada
 rama sustituyendo los componentes del objetivo por el mejor aporte que queda disponible. Como todas
