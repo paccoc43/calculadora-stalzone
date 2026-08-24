@@ -700,6 +700,9 @@ function setOptStatus(t){ $('#o-status').textContent = t; }
 // heredando la de la Calculadora pero se puede cambiar sin tocar la build en curso.
 const optState = {containerId: null, goals: [{id: '__eh', weight: 100}]};
 const optContainer = () => optState.containerId ? CNT[optState.containerId] : null;
+// Filas de objetivo ya pintadas: mover una barra retoca las demás, y hay que poder
+// actualizarlas sin recrear el DOM para no cortar el arrastre en curso.
+let goalRows = [];
 
 /** Valor de una estadística concreta en un resultado ya calculado por el motor. */
 function goalValue(goalId, res){
@@ -814,12 +817,52 @@ async function runOptimizer(){
 /** La base que se resta a un objetivo va en el mismo signo que usa goalSpec (min → −valor). */
 const min0 = (goalId, base) => ENGINE.CAN_BOTH.includes(goalId) ? -base : base;
 
+/*
+ * Reparto de los objetivos. Siempre suma 100 %: las barras se mueven en conjunto, así que
+ * el porcentaje que se lee en cada una es ya su parte real de la búsqueda.
+ */
+
+/** Redondea a enteros un reparto de `total`, dando el sobrante a los que más decimal
+ *  pierden, para que la suma cuadre exactamente. */
+function roundShares(shares, total){
+  const out = shares.map(v => Math.floor(v));
+  let left = total - out.reduce((a, b) => a + b, 0);
+  const order = shares.map((_, i) => i).sort((a, b) => (shares[b] % 1) - (shares[a] % 1));
+  for (let k = 0; k < order.length && left > 0; k++, left--) out[order[k]]++;
+  return out;
+}
+
 /** Reparte el 100 % a partes iguales entre los objetivos elegidos. */
 function evenWeights(){
   const n = optState.goals.length;
   if (!n) return;
-  const w = Math.round(100 / n);
-  optState.goals.forEach((g, i) => g.weight = i === n - 1 ? 100 - w * (n - 1) : w);
+  roundShares(optState.goals.map(() => 100 / n), 100)
+    .forEach((w, i) => optState.goals[i].weight = w);
+}
+
+/** Reescala los pesos que haya para que vuelvan a sumar 100 % sin alterar sus proporciones.
+ *  Es lo que se hace al quitar un objetivo: los que quedan conservan su relación. */
+function spreadWeights(){
+  const gs = optState.goals;
+  if (!gs.length) return;
+  const sum = gs.reduce((a, g) => a + g.weight, 0);
+  roundShares(gs.map(g => sum > 0 ? g.weight / sum * 100 : 100 / gs.length), 100)
+    .forEach((w, i) => gs[i].weight = w);
+}
+
+/**
+ * Fija el peso de un objetivo al mover su barra y reparte lo que queda entre los demás,
+ * en proporción a lo que ya tenían. Si los demás están todos a cero no hay proporción que
+ * respetar, así que el resto se parte a partes iguales.
+ */
+function rebalance(g, value){
+  const others = optState.goals.filter(x => x !== g);
+  g.weight = Math.max(0, Math.min(100, Math.round(value)));
+  if (!others.length){ g.weight = 100; return; }
+  const rest = 100 - g.weight;
+  const sum = others.reduce((a, x) => a + x.weight, 0);
+  roundShares(others.map(x => sum > 0 ? x.weight / sum * rest : rest / others.length), rest)
+    .forEach((w, i) => others[i].weight = w);
 }
 
 function renderOptContainer(){
@@ -840,35 +883,48 @@ function renderOptGoals(){
   const host = $('#o-goal-rows');
   host.replaceChildren();
   const multi = optState.goals.length > 1;
+  goalRows = [];
   for (const g of optState.goals){
     const label = (GOALS.find(x => x.id === g.id) || {label: g.id}).label;
-    const row = el('div', {className:'ctl', style:'grid-template-columns:1fr 90px 32px;margin-bottom:6px'});
-    row.append(el('label', {}, statIcon(g.id), ` ${label}`));
-    if (multi){
-      const w = el('input', {type:'number', min:'0', max:'100', step:'5', value: g.weight});
-      w.oninput = () => { g.weight = Math.max(0, Math.min(100, +w.value || 0)); syncGoalNote(); };
-      row.append(w);
-    } else {
-      row.append(el('div', {className:'mono', style:'color:var(--muted)', textContent:'100 %'}));
-    }
+    const box = el('div', {className:'goal'});
+    const pct = el('span', {className:'w'});
     const del = el('button', {className:'danger', textContent:'×', title:'Quitar este objetivo'});
-    del.disabled = optState.goals.length < 2;
+    del.disabled = !multi;
     del.onclick = () => {
       optState.goals = optState.goals.filter(x => x !== g);
-      evenWeights(); renderOptGoals();
+      spreadWeights();
+      renderOptGoals();
     };
-    row.append(del);
-    host.append(row);
+    box.append(el('div', {className:'head'},
+      el('span', {className:'n'}, statIcon(g.id), ` ${label}`), pct, del));
+    // Con un solo objetivo no hay nada que repartir: se enseña el 100 % y punto.
+    let bar = null;
+    if (multi){
+      bar = el('input', {type:'range', min:'0', max:'100', step:'1', value: g.weight});
+      bar.oninput = () => { rebalance(g, +bar.value); syncGoalWeights(); };
+      box.append(bar);
+    }
+    goalRows.push({g, bar, pct});
+    host.append(box);
+  }
+  syncGoalWeights();
+}
+
+/** Refresca porcentajes y barras a partir del estado, sin tocar el DOM ya creado. */
+function syncGoalWeights(){
+  for (const r of goalRows){
+    r.pct.textContent = r.g.weight + ' %';
+    if (r.bar && +r.bar.value !== r.g.weight) r.bar.value = r.g.weight;
   }
   syncGoalNote();
 }
 
 function syncGoalNote(){
-  const total = optState.goals.reduce((a, g) => a + g.weight, 0);
   $('#o-goal-note').textContent = optState.goals.length < 2
     ? 'Añade más estadísticas para repartir la búsqueda entre varias a la vez.'
     : 'Cada objetivo se mide como porcentaje de lo que lograría persiguiéndolo solo, y se'
-      + ` promedian con estos pesos (se normalizan; ahora suman ${total} %).`;
+      + ' promedian con este reparto. Al mover una barra las demás se ajustan solas: el'
+      + ' total es siempre 100 %.';
 }
 
 /** Media ponderada de los objetivos ya normalizados, en tanto por uno. */
