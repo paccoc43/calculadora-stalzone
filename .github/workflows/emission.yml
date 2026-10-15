@@ -1,0 +1,44 @@
+name: Aviso de emisiones
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # GitHub lo retrasa a menudo; el script avisa también de emisiones ya terminadas
+  workflow_dispatch:
+
+# Que dos ejecuciones no se pisen el estado ni avisen dos veces.
+concurrency:
+  group: emission
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # La caché guarda la última emisión avisada entre ejecuciones. Las cachés no se pueden
+      # sobrescribir, así que cada ejecución guarda una nueva y se restaura la más reciente.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .emission_state.json
+          key: emission-state-${{ github.run_id }}
+          restore-keys: emission-state-
+
+      - name: Consultar la emisión
+        env:
+          STALZONE_CLIENT_ID: ${{ secrets.STALZONE_CLIENT_ID }}
+          STALZONE_CLIENT_SECRET: ${{ secrets.STALZONE_CLIENT_SECRET }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          STALZONE_REGION: eu
+        run: python tools/emission_notifier.py
+
+      - uses: actions/cache/save@v4
+        if: hashFiles('.emission_state.json') != ''
+        with:
+          path: .emission_state.json
+          key: emission-state-${{ github.run_id }}
