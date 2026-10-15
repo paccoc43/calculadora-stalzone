@@ -13,6 +13,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    environment: Stalzone tormentas   # ahí están los secretos
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
