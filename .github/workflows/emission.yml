@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '*/5 * * * *'   # GitHub lo retrasa a menudo; el script avisa también de emisiones ya terminadas
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'Enviar mensaje de prueba'
+        type: boolean
+        default: false
 
 # Que dos ejecuciones no se pisen el estado ni avisen dos veces.
 concurrency:
@@ -36,7 +41,7 @@ jobs:
           STALZONE_CLIENT_SECRET: ${{ secrets.STALZONE_CLIENT_SECRET }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           STALZONE_REGION: eu
-        run: python tools/emission_notifier.py
+        run: python tools/emission_notifier.py ${{ inputs.test && '--test' || '' }}
 
       - uses: actions/cache/save@v4
         if: hashFiles('.emission_state.json') != ''
