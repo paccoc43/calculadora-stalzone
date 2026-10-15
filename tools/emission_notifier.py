@@ -20,6 +20,7 @@ import datetime
 import io
 import json
 import os
+import random
 import sys
 import urllib.request
 
@@ -58,16 +59,46 @@ def save_state(path, state):
         json.dump(state, f)
 
 
+USERNAME = 'AItor Menta'
+
+# Frases del locutor. {region} es la región y {start} la hora de inicio, que Discord pinta en
+# la hora local de cada uno ("hace 3 minutos").
+ACTIVE = [
+    '📻 ¡Buenas tardes, stalkers de {region}! Aquí AItor Menta con el parte del tiempo: '
+    'se esperan cielos rojos, rayos y un 100 % de probabilidad de que te frías si sigues '
+    'al raso. La emisión ha empezado {start}. ¡Al refugio!',
+    '🎙️ Interrumpimos la programación musical para un aviso urgente: emisión en {region}, '
+    'empezó {start}. Recuerden: un búnker al día es salud.',
+    '⛈️ AItor Menta informa: ¡hay tormenta! Y no de las de paraguas. Emisión en {region} '
+    'desde {start}. Los artefactos frescos, después; ahora, a esconderse.',
+    '📡 Atención, oyentes de {region}: la Zona ha decidido estornudar. Emisión en curso '
+    'desde {start}. Si ve el cielo de color raro, no es su monitor.',
+    '🌩️ Parte meteorológico de AItor Menta: temperatura agradable, ligera brisa radiactiva '
+    'y una emisión en {region} que empezó {start}. Les dejo con un tema mientras corren.',
+    '📻 ¡Ding, ding, ding! Ha tocado la lotería de la Zona: emisión en {region} ({start}). '
+    'Premio para quien llegue vivo al refugio: artefactos nuevos.',
+    '🎙️ Se ruega a los stalkers de {region} que dejen lo que estén haciendo, incluido '
+    'pelearse con el bandido de turno: emisión desde {start}. Ya se matarán luego.',
+]
+FINISHED = [
+    '📻 AItor Menta, con retraso pero con estilo: hubo emisión en {region} (empezó {start}). '
+    'La tormenta ya ha pasado y el suelo está sembrado de artefactos. ¡A recolectar!',
+    '🎙️ Fe de erratas del parte: llovió más de lo previsto. Emisión en {region} a {start}. '
+    'Ya se puede salir; los artefactos les esperan.',
+    '☀️ Tras la tormenta llega la calma… y los artefactos. Emisión en {region} ({start}). '
+    'AItor Menta les desea buena caza.',
+    '📡 Los meteorólogos de la Zona confirman que la emisión de {region} ({start}) ya ha '
+    'terminado. Saquen las mochilas: hoy toca cosecha.',
+    '🌈 Ha escampado en {region}. La emisión empezó {start} y ha dejado regalitos por el '
+    'mapa. Quien llegue primero, se los lleva.',
+]
+
+
 def build_message(region, start, active):
-    # <t:...:R> lo pinta Discord en la hora local de cada uno ("hace 3 minutos").
     ts = int(start.timestamp())
-    if active:
-        text = ('⚠️ **¡Emisión en curso en %s!** Ha empezado <t:%d:R>. '
-                'Ponte a cubierto: después aparecerán artefactos nuevos.' % (region, ts))
-    else:
-        text = ('☢️ **Ha habido una emisión en %s** (empezó <t:%d:t>, <t:%d:R>). '
-                'Ya han aparecido los artefactos nuevos.' % (region, ts, ts))
-    return {'content': text, 'username': 'Emisiones STALZONE'}
+    when = '<t:%d:R>' % ts if active else '<t:%d:t>, <t:%d:R>' % (ts, ts)
+    text = random.choice(ACTIVE if active else FINISHED).format(region=region, start=when)
+    return {'content': text, 'username': USERNAME}
 
 
 def post_discord(webhook, payload):
@@ -95,8 +126,9 @@ def main():
     if args.test:
         if not args.webhook:
             sys.exit('Falta DISCORD_WEBHOOK_URL.')
-        post_discord(args.webhook, {'content': '🧪 Mensaje de prueba del aviso de emisiones.',
-                                    'username': 'Emisiones STALZONE'})
+        now = datetime.datetime.now(datetime.timezone.utc)
+        post_discord(args.webhook, build_message(args.region.upper(), now, True))
+        post_discord(args.webhook, build_message(args.region.upper(), now, False))
         print('Mensaje de prueba enviado.')
         return
 
