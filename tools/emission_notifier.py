@@ -120,17 +120,7 @@ def main():
     ap.add_argument('--webhook', default=os.environ.get('DISCORD_WEBHOOK_URL'))
     ap.add_argument('--state', default=STATE)
     ap.add_argument('--dry-run', action='store_true')
-    ap.add_argument('--test', action='store_true', help='envía un mensaje de prueba y sale')
     args = ap.parse_args()
-
-    if args.test:
-        if not args.webhook:
-            sys.exit('Falta DISCORD_WEBHOOK_URL.')
-        now = datetime.datetime.now(datetime.timezone.utc)
-        post_discord(args.webhook, build_message(args.region.upper(), now, True))
-        post_discord(args.webhook, build_message(args.region.upper(), now, False))
-        print('Mensaje de prueba enviado.')
-        return
 
     if not (args.client_id and args.client_secret):
         sys.exit('Faltan STALZONE_CLIENT_ID y STALZONE_CLIENT_SECRET.')
