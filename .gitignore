@@ -5,6 +5,3 @@
 
 __pycache__/
 *.pyc
-
-# Estado local de tools/emission_notifier.py.
-.emission_state.json
